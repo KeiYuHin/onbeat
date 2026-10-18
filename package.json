@@ -1,6 +1,7 @@
 {
   "name": "onbeat",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "shared",
