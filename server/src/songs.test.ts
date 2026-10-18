@@ -75,7 +75,7 @@ it('refuses an invalid save and leaves the file alone', async () => {
   const library = fsLibrary(dir);
   await expect(library.save!('s', (r) => ({ ...r, form: ['nope'] }))).rejects.toThrow(/form/);
   expect(JSON.parse(readFileSync(join(dir, 's.json'), 'utf8'))).toEqual(raw);
-  expect((await library.list())[0].form).toEqual(['a']);
+  expect((await library.list())[0].form).toEqual([{ section: 'a' }]);
 });
 
 it('keeps lines short when formatting', () => {

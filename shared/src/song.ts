@@ -1,6 +1,7 @@
 // Song skeleton (sections, bars, chords) shared by all parts, plus per-part details. See SPEC.md.
 import { PARTS, type Part } from './protocol';
 import { everyBeats, type Barlines } from './timeline';
+import { parseChord, parseKey, type Chord, type Key } from './chord';
 
 export const DRUMS = ['kick', 'snare', 'hat', 'crash', 'ride', 'tom'] as const;
 export type Drum = (typeof DRUMS)[number];
@@ -46,24 +47,42 @@ export function meter([n, d]: TimeSignature): Meter {
 
 export const stepsPerBar = (m: Meter) => m.beats * m.stepsPerBeat;
 
+/** Written in a bar's chords to hold the chord before it: ["1", "-", "-", "5/7"] is 3 beats + 1. */
+export const HOLD = '-';
+
 /** A bar as parsed: JSON bars are written as a chord array, or as an object when they need more. */
 export type Bar = {
+  /** Each entry takes an equal share of the bar; HOLD extends the chord before it. */
   chords: string[];
   /** Only for a bar in a different meter from the song (a 2/4 bar in a 4/4 song). */
   timeSignature?: TimeSignature;
+  cues?: Cue[];
 };
+
+/**
+ * A note on a bar, like the 起鼓 or 钢琴 on a 白玉米谱 chart, for one part or (without `part`) everyone.
+ * JSON writes an everyone cue as just its text.
+ */
+export type Cue = { part?: Part; text: string };
 
 /** Parsed sections always list their bars unrolled; `{ loop, times }` in the JSON is expanded by parseSong. */
 export type Section = { label?: string; bars: Bar[] };
+
+/**
+ * One entry of the playing order. A `key` changes key from this section on (转调), until the next change.
+ * JSON writes plain entries as just the section id.
+ */
+export type FormEntry = { section: string; key?: string };
 
 export type Song = {
   id: string;
   title: string;
   bpm: number;
   timeSignature: TimeSignature;
+  /** The key chords are relative to: needed for scale-degree chords, and to show letters as degrees. */
   key?: string;
   sections: Record<string, Section>;
-  form: string[];
+  form: FormEntry[];
   parts: Partial<Record<Part, PartSpec>>;
 };
 
@@ -117,8 +136,24 @@ export function parseSong(data: unknown): Song {
     const bars: Bar[] = looped ? Array.from({ length: sec.times }, () => parsed).flat() : parsed;
     sections[id] = { ...(typeof sec.label === 'string' && { label: sec.label }), bars: structuredClone(bars) };
   }
+  if (s.key !== undefined && !(typeof s.key === 'string' && parseKey(s.key)))
+    fail('key must be a major key like "C", "Ab" or "F#"');
   if (!Array.isArray(s.form) || s.form.length === 0) fail('form must list at least one section');
-  for (const id of s.form) if (!(id in sections)) fail(`form refers to unknown section "${id}"`);
+  const form: FormEntry[] = s.form.map((entry: any, i: number) => {
+    const e = typeof entry === 'string' ? { section: entry } : entry;
+    if (typeof e?.section !== 'string') fail(`form entry ${i + 1} must be a section id or { "section", "key" }`);
+    if (!(e.section in sections)) fail(`form refers to unknown section "${e.section}"`);
+    if (e.key !== undefined && !(typeof e.key === 'string' && parseKey(e.key)))
+      fail(`form entry ${i + 1} key must be a major key like "G"`);
+    if (e.key !== undefined && s.key === undefined) fail('a key change needs the song\'s own "key"');
+    return { section: e.section, ...(e.key !== undefined && { key: e.key }) };
+  });
+  if (s.key === undefined) {
+    for (const [id, sec] of Object.entries(sections)) {
+      const degree = sec.bars.flatMap((b) => b.chords).find((c) => parseChord(c, C_MAJOR)?.degree);
+      if (degree) fail(`section "${id}" has scale-degree chord "${degree}", which needs the song's "key"`);
+    }
+  }
   if (typeof s.parts !== 'object' || s.parts === null) fail('missing parts');
   const steps = stepsPerBar(meter(ts));
   const checkDetail = (where: string, d: any) => {
@@ -137,21 +172,29 @@ export function parseSong(data: unknown): Song {
       checkDetail(`part "${part}" section "${id}"`, d);
     }
   }
-  return { ...structuredClone(s), sections } as Song;
+  return { ...structuredClone(s), sections, form } as Song;
 }
 
 const isTimeSignature = (ts: unknown): ts is TimeSignature =>
   Array.isArray(ts) && ts.length === 2 && Number.isInteger(ts[0]) && ts[0] > 0 && [2, 4, 8].includes(ts[1]);
 
-/** `["C", "G/B"]`, or `{ "chords": [...], "timeSignature": [2, 4] }`. */
+/** `["C", "G/B"]`, or `{ "chords": [...], "timeSignature": [2, 4], "cues": ["rit.", { "part": "drums", "text": "起鼓" }] }`. */
 function parseBar(bar: any, fail: (msg: string) => never): Bar {
   const written = Array.isArray(bar) ? { chords: bar } : bar;
   if (typeof written !== 'object' || written === null) fail('must be an array of chord names or an object');
-  const { chords, timeSignature } = written;
+  const { chords, timeSignature, cues } = written;
   if (!Array.isArray(chords) || chords.length === 0 || !chords.every((c) => typeof c === 'string' && c))
     fail('needs a non-empty array of chord names');
+  if (chords[0] === HOLD) fail(`can't start with "${HOLD}": it holds the chord before it in the same bar`);
   if (timeSignature !== undefined && !isTimeSignature(timeSignature)) fail('timeSignature must be like [2, 4]');
-  return { chords, ...(timeSignature && { timeSignature }) };
+  if (cues !== undefined && !Array.isArray(cues)) fail('cues must be an array');
+  const parsedCues = (cues ?? []).map((cue: any): Cue => {
+    const c = typeof cue === 'string' ? { text: cue } : cue;
+    if (typeof c?.text !== 'string' || !c.text) fail('cues must be text or { "part", "text" }');
+    if (c.part !== undefined && !PARTS.includes(c.part)) fail(`cue for unknown part "${c.part}"`);
+    return { ...(c.part && { part: c.part }), text: c.text };
+  });
+  return { chords, ...(timeSignature && { timeSignature }), ...(parsedCues.length && { cues: parsedCues }) };
 }
 
 /** A section's own pattern, or 'default' to drop it so the section follows the whole-song pattern. */
@@ -216,7 +259,50 @@ export type SectionSpan = {
   times: number;
 };
 
-export type BarSpan = { chords: string[]; sectionIndex: number; startBeat: number; beats: number; meter: Meter };
+/** A chord and the beats it lasts within its bar. */
+export type ChordSlot = {
+  /** As written (for a held chord, the chord it holds). */
+  name: string;
+  /** Null when the name isn't a chord we can read ("N.C."); it is still shown. */
+  chord: Chord | null;
+  /** Beats from the start of the bar. */
+  start: number;
+  beats: number;
+};
+
+export type BarSpan = {
+  chords: ChordSlot[];
+  sectionIndex: number;
+  startBeat: number;
+  beats: number;
+  meter: Meter;
+  /** The key in effect, after any key change; C when the song has none. */
+  key: Key;
+  cues: Cue[];
+};
+
+const C_MAJOR = parseKey('C')!;
+
+/**
+ * The bar's chords with HOLDs merged into the chord before them. A bass-only change ("/#5") takes the
+ * chord it follows, even from an earlier bar.
+ */
+function chordSlots(chords: string[], beats: number, key: Key, before: Chord | null): ChordSlot[] {
+  const share = beats / chords.length;
+  const slots: ChordSlot[] = [];
+  let prev = before;
+  chords.forEach((name, i) => {
+    if (name === HOLD) {
+      slots[slots.length - 1].beats += share;
+      return;
+    }
+    let chord = parseChord(name, key);
+    if (chord?.root === null) chord = prev && prev.root !== null ? { ...prev, bass: chord.bass } : null;
+    if (chord) prev = chord;
+    slots.push({ name, chord, start: i * share, beats: share });
+  });
+  return slots;
+}
 
 /** The song unrolled along the form into a flat, beat-indexed timeline. */
 export type CompiledSong = {
@@ -235,13 +321,16 @@ export type ExtraPasses = Record<number, number>;
 export function compileSong(song: Song, extraPasses: ExtraPasses = {}): CompiledSong {
   const songMeter = meter(song.timeSignature);
   const totals = new Map<string, number>();
-  for (const id of song.form) totals.set(id, (totals.get(id) ?? 0) + 1);
+  for (const { section: id } of song.form) totals.set(id, (totals.get(id) ?? 0) + 1);
   const seen = new Map<string, number>();
 
   const sections: SectionSpan[] = [];
   const bars: BarSpan[] = [];
   let beat = 0;
-  song.form.forEach((id, sectionIndex) => {
+  let key = (song.key && parseKey(song.key)) || C_MAJOR;
+  let lastChord: Chord | null = null;
+  song.form.forEach(({ section: id, key: change }, sectionIndex) => {
+    if (change) key = parseKey(change)!;
     const n = (seen.get(id) ?? 0) + 1;
     seen.set(id, n);
     const written = song.sections[id].bars;
@@ -254,7 +343,9 @@ export function compileSong(song: Song, extraPasses: ExtraPasses = {}): Compiled
       // Extra passes replay the loop; bars as written keep their own details.
       const bar = written[i < written.length ? i : i % loopBars];
       const m = bar.timeSignature ? meter(bar.timeSignature) : songMeter;
-      bars.push({ chords: bar.chords, sectionIndex, startBeat: beat, beats: m.beats, meter: m });
+      const chords = chordSlots(bar.chords, m.beats, key, lastChord);
+      for (const slot of chords) lastChord = slot.chord ?? lastChord;
+      bars.push({ chords, sectionIndex, startBeat: beat, beats: m.beats, meter: m, key, cues: bar.cues ?? [] });
       beat += m.beats;
     }
     sections.push({
@@ -301,9 +392,11 @@ export type SongPosition = {
   barIndex: number; // 0-based, whole song
   barInSection: number; // 1-based
   beatInBar: number; // 1-based
-  chord: string;
+  chord: ChordSlot;
+  /** The bar's key, for showing chords. */
+  key: Key;
   /** Next chord change, skipping repeats of the current chord; null at the end of the song. */
-  next: { chord: string; inBeats: number } | null;
+  next: { chord: ChordSlot; key: Key; inBeats: number } | null;
 };
 
 /** Where a beat falls in the song, or null before the start (count-in) and after the end. */
@@ -313,16 +406,15 @@ export function songPosition(c: CompiledSong, beat: number): SongPosition | null
   const bar = c.bars[barIndex];
   const section = c.sections[bar.sectionIndex];
   const inBar = beat - bar.startBeat;
-  // Chords in a bar split its beats evenly.
-  const slot = Math.floor((inBar * bar.chords.length) / bar.beats);
+  const slot = slotAt(bar, inBar);
   const chord = bar.chords[slot];
 
   let next: SongPosition['next'] = null;
   for (let b = barIndex, s = slot + 1; b < c.bars.length && !next; b++, s = 0) {
-    const { chords, startBeat, beats } = c.bars[b];
+    const { chords, startBeat, key } = c.bars[b];
     for (; s < chords.length; s++) {
-      if (chords[s] !== chord) {
-        next = { chord: chords[s], inBeats: startBeat + (s * beats) / chords.length - beat };
+      if (chords[s].name !== chord.name || key !== bar.key) {
+        next = { chord: chords[s], key, inBeats: startBeat + chords[s].start - beat };
         break;
       }
     }
@@ -334,9 +426,20 @@ export function songPosition(c: CompiledSong, beat: number): SongPosition | null
     barInSection: barIndex - section.startBar + 1,
     beatInBar: Math.floor(inBar) + 1,
     chord,
+    key: bar.key,
     next,
   };
 }
+
+/** Index of the chord slot playing `inBar` beats into the bar. */
+export function slotAt(bar: BarSpan, inBar: number): number {
+  let i = 0;
+  while (i < bar.chords.length - 1 && bar.chords[i + 1].start <= inBar + 1e-9) i++;
+  return i;
+}
+
+/** The bar's cues for one part: its own and everyone's. */
+export const cuesFor = (bar: BarSpan, part: Part) => bar.cues.filter((c) => !c.part || c.part === part);
 
 /** A part's details for a section: the default with that section's overrides applied. */
 export function partDetail(song: Song, part: Part, sectionId: string): PartDetail | null {

@@ -1,5 +1,6 @@
 // M2.5 metronome and drum machine as pure functions: sounds are events at beat positions,
 // so every device derives the same events from the shared timeline. The web app schedules them.
+import { bassPitch, type Chord, type Key } from './chord';
 import { barIndexAt, partDetail, stepsPerBar, type CompiledSong, type Drum, type DrumPattern, type Meter } from './song';
 
 export type SoundName = Drum | 'click' | 'clickAccent' | 'bass';
@@ -34,20 +35,16 @@ export const DEFAULT_SOUND_OPTIONS: SoundOptions = {
   bassRhythm: 2,
 };
 
-const PITCH_CLASSES: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 /** Lowest bass note, E1 (the open E string); roots land in E1..D#2. */
 const BASS_LOW = 28;
 
 /**
  * MIDI note the bass plays for a chord: the slash bass if there is one (G/B → B), else the root.
- * Null when the name doesn't start with a note letter (N.C., scale degrees).
+ * Null for names that aren't chords (N.C.).
  */
-export function bassNote(chord: string): number | null {
-  const slash = chord.split('/')[1];
-  const m = /^([A-G])([#b]?)/.exec(slash ?? '') ?? /^([A-G])([#b]?)/.exec(chord);
-  if (!m) return null;
-  const pc = PITCH_CLASSES[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
-  return BASS_LOW + ((((pc - 4) % 12) + 12) % 12);
+export function bassNote(chord: Chord | null, key: Key): number | null {
+  const pc = bassPitch(chord, key);
+  return pc === null ? null : BASS_LOW + ((((pc - 4) % 12) + 12) % 12);
 }
 
 const ACCENT = 1;
@@ -170,21 +167,20 @@ function drumStep(events: SoundEvent[], c: CompiledSong, barIndex: number, step:
 function bassEvents(events: SoundEvent[], c: CompiledSong, from: number, to: number, rhythm: BassRhythm) {
   for (let b = barIndexAt(c, from); b < c.bars.length && c.bars[b].startBeat < to; b++) {
     const bar = c.bars[b];
-    const slot = bar.beats / bar.chords.length;
-    // In compound meters the eighths come three to a beat.
-    const step = rhythm === 0 ? slot : 1 / (rhythm === 2 ? bar.meter.eighthsPerBeat : 1);
-    bar.chords.forEach((chord, i) => {
-      const note = bassNote(chord);
-      if (note === null) return;
-      const start = bar.startBeat + i * slot;
-      const end = start + slot;
+    for (const slot of bar.chords) {
+      const note = bassNote(slot.chord, bar.key);
+      if (note === null) continue;
+      // In compound meters the eighths come three to a beat.
+      const step = rhythm === 0 ? slot.beats : 1 / (rhythm === 2 ? bar.meter.eighthsPerBeat : 1);
+      const start = bar.startBeat + slot.start;
+      const end = start + slot.beats;
       // Integer step counters keep beats exact, as for the metronome.
       for (let k = 0; start + k * step < end - 1e-9; k++) {
         const beat = start + k * step;
         if (beat < from || beat >= to) continue;
         events.push({ beat, sound: 'bass', gain: k === 0 ? ACCENT : HIT, note, length: Math.min(step, end - beat) });
       }
-    });
+    }
   }
 }
 

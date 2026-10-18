@@ -1,7 +1,7 @@
 // Node-side client used by the server tests; mirrors what the web app does over the socket.
 import { performance } from 'node:perf_hooks';
 import WebSocket from 'ws';
-import { ClockSync, type ClientMsg, type PlaybackState, type ServerMsg, type Song } from '@onbeat/shared';
+import { ClockSync, parseSong, type ClientMsg, type PlaybackState, type ServerMsg, type Song } from '@onbeat/shared';
 
 export class TestClient {
   readonly clock: ClockSync;
@@ -55,13 +55,14 @@ export class TestClient {
   }
 }
 
+/** Written like song files and parsed the same way. */
 export const TEST_SONGS: Song[] = [
   {
     id: 'four',
     title: 'Four',
     bpm: 120,
     timeSignature: [4, 4],
-    sections: { a: { bars: [{ chords: ['C'] }, { chords: ['G'] }] } },
+    sections: { a: { bars: [['C'], ['G']] } },
     form: ['a'],
     parts: {},
   },
@@ -70,8 +71,8 @@ export const TEST_SONGS: Song[] = [
     title: 'Waltz',
     bpm: 90,
     timeSignature: [3, 4],
-    sections: { a: { bars: [{ chords: ['F'] }, { chords: ['C'] }] } },
+    sections: { a: { bars: [['F'], ['C']] } },
     form: ['a', 'a'],
     parts: {},
   },
-];
+].map(parseSong);

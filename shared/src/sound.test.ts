@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
+import { parseChord, parseKey } from './chord';
 import { checkDrumPattern, compileSong, meter, parseSong } from './song';
 import {
-  bassNote,
+  bassNote as noteFor,
   DEFAULT_SOUND_OPTIONS,
   defaultDrumPattern,
   drumPresets,
@@ -150,6 +151,8 @@ describe('drum presets', () => {
 
 describe('root-note bass', () => {
   it('maps chord names to a root (or slash bass) in the low bass range', () => {
+    const c = parseKey('C')!;
+    const bassNote = (name: string, key = c) => noteFor(parseChord(name, key), key);
     expect(bassNote('E')).toBe(28);
     expect(bassNote('C')).toBe(36);
     expect(bassNote('Am7')).toBe(33);
@@ -158,7 +161,8 @@ describe('root-note bass', () => {
     expect(bassNote('G/B')).toBe(35);
     expect(bassNote('Eb')).toBe(39);
     expect(bassNote('N.C.')).toBeNull();
-    expect(bassNote('6m')).toBeNull();
+    expect(bassNote('6m')).toBe(33); // A in C
+    expect(bassNote('5/7', parseKey('Ab')!)).toBe(31); // G, the 7 of Ab
   });
 
   it('plays eighths, quarters or one held note per chord', () => {

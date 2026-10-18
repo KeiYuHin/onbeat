@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
+import { chordText } from './chord';
 import {
   applyDrumEdits,
   barIndexAt,
   barlines,
+  cuesFor,
   meter,
   checkDrumPattern,
   compileSong,
@@ -93,8 +95,8 @@ describe('meters', () => {
 
   it('finds position, chord slots and the next change in a short bar', () => {
     const c = compileSong(odd);
-    expect(songPosition(c, 5.5)).toMatchObject({ barIndex: 1, beatInBar: 2, chord: 'G', next: { chord: 'C', inBeats: 0.5 } });
-    expect(songPosition(c, 6)).toMatchObject({ barIndex: 2, barInSection: 3, beatInBar: 1, chord: 'C' });
+    expect(songPosition(c, 5.5)).toMatchObject({ barIndex: 1, beatInBar: 2, chord: { name: 'G' }, next: { chord: { name: 'C' }, inBeats: 0.5 } });
+    expect(songPosition(c, 6)).toMatchObject({ barIndex: 2, barInSection: 3, beatInBar: 1, chord: { name: 'C' } });
     expect(barIndexAt(c, 19.99)).toBe(5);
   });
 
@@ -125,6 +127,76 @@ describe('meters', () => {
   });
 });
 
+describe('chords on beats and keys', () => {
+  // The start of 明年今日: 1 for three beats and 5/7 for one, 6m, then a bass-only change.
+  const chart = parseSong({
+    id: 'ming-nian',
+    title: '明年今日',
+    bpm: 62,
+    timeSignature: [4, 4],
+    key: 'Ab',
+    sections: {
+      a: { bars: [['1', '-', '-', '5/7'], ['6m'], ['37', '/#5']] },
+      b: { bars: [['4M7']] },
+    },
+    form: ['a', { section: 'b', key: 'G' }, 'a'],
+    parts: {},
+  });
+  const c = compileSong(chart);
+
+  it('holds a chord over the beats after it', () => {
+    expect(c.bars[0].chords.map((s) => [s.name, s.start, s.beats])).toEqual([
+      ['1', 0, 3],
+      ['5/7', 3, 1],
+    ]);
+    expect(songPosition(c, 2.5)).toMatchObject({ chord: { name: '1' }, next: { chord: { name: '5/7' }, inBeats: 0.5 } });
+    expect(songPosition(c, 3)!.chord.name).toBe('5/7');
+  });
+
+  it('lets a bass-only change keep the chord before it', () => {
+    expect(c.bars[2].chords[1]).toMatchObject({ name: '/#5', chord: { root: 4, quality: '7', bass: 8 } });
+    expect(chordText('/#5', c.bars[2].chords[1].chord, c.bars[2].key, 'letter')).toBe('C7/E');
+  });
+
+  it('changes key from a form entry on, for every section after it', () => {
+    expect(chart.form).toEqual([{ section: 'a' }, { section: 'b', key: 'G' }, { section: 'a' }]);
+    expect(c.bars.map((b) => b.key.name)).toEqual(['Ab', 'Ab', 'Ab', 'G', 'G', 'G', 'G']);
+    const fourth = c.bars[3].chords[0];
+    expect(chordText(fourth.name, fourth.chord, c.bars[3].key, 'letter')).toBe('Cmaj7');
+  });
+
+  it('counts a key change as a chord change even when the name stays the same', () => {
+    const pos = songPosition(c, 3 * 4 + 0.5)!; // 4M7 in G, then 1 in G
+    expect(pos.next).toMatchObject({ chord: { name: '1' }, key: { name: 'G' }, inBeats: 3.5 });
+  });
+
+  it('keeps cues on the bars they were written on, for one part or everyone', () => {
+    const song = parseSong({
+      ...chart,
+      sections: { a: { loop: [{ chords: ['1'], cues: [{ part: 'keys', text: '钢琴' }] }, ['5']], times: 2 } },
+      form: ['a', { section: 'a', key: 'G' }],
+    });
+    const withCues = parseSong({ ...song, sections: { a: { bars: [{ chords: ['1'], cues: ['rit.', { part: 'drums', text: '起鼓' }] }] } } });
+    const bar = compileSong(withCues).bars[0];
+    expect(bar.cues).toEqual([{ text: 'rit.' }, { part: 'drums', text: '起鼓' }]);
+    expect(cuesFor(bar, 'drums').map((c) => c.text)).toEqual(['rit.', '起鼓']);
+    expect(cuesFor(bar, 'bass').map((c) => c.text)).toEqual(['rit.']);
+    expect(compileSong(song).bars.map((b) => b.cues.length)).toEqual([1, 0, 1, 0, 1, 0, 1, 0]);
+  });
+
+  it.each([
+    [{ sections: { a: { bars: [{ chords: ['1'], cues: [{ part: 'vocals', text: 'x' }] }] } } }, /cue for unknown part "vocals"/],
+    [{ sections: { a: { bars: [{ chords: ['1'], cues: [{}] }] } } }, /cues must be text/],
+    [{ sections: { a: { bars: [['-', 'C']] } } }, /bar 1 can't start with "-"/],
+    [{ key: undefined }, /scale-degree chord "1", which needs the song's "key"/],
+    [{ key: 'Am' }, /key must be a major key/],
+    [{ form: [{ section: 'a', key: 'H' }] }, /form entry 1 key/],
+    [{ form: [{ key: 'G' }] }, /form entry 1 must be/],
+  ])('rejects %j', (patch, error) => {
+    expect(() => parseSong({ ...chart, form: ['a'], ...patch })).toThrow(error);
+  });
+});
+
 describe('songPosition', () => {
   const c = compileSong(example);
 
@@ -139,8 +211,8 @@ describe('songPosition', () => {
       barIndex: 12,
       barInSection: 1,
       beatInBar: 2,
-      chord: 'F',
-      next: { chord: 'G', inBeats: 2.5 },
+      chord: { name: 'F' },
+      next: { chord: { name: 'G' }, inBeats: 2.5 },
     });
   });
 
@@ -148,8 +220,8 @@ describe('songPosition', () => {
     // Chorus ends C, C, then the next section starts on C again before Am.
     const lastChorusBar = c.sections[2].startBar + 6;
     const pos = songPosition(c, lastChorusBar * 4)!;
-    expect(pos.chord).toBe('C');
-    expect(pos.next).toEqual({ chord: 'Am', inBeats: 3 * 4 }); // C, C, then verse C
+    expect(pos.chord.name).toBe('C');
+    expect(pos.next).toMatchObject({ chord: { name: 'Am' }, inBeats: 3 * 4 }); // C, C, then verse C
   });
 
   it('has no next chord at the very end', () => {
@@ -158,10 +230,10 @@ describe('songPosition', () => {
 
   it('splits several chords in a bar evenly across its beats', () => {
     const w = compileSong(waltz);
-    expect(songPosition(w, 0)!.chord).toBe('C');
-    expect(songPosition(w, 1)).toMatchObject({ chord: 'G/B', next: { chord: 'Am', inBeats: 1 } });
-    expect(songPosition(w, 2.9)!.chord).toBe('Am');
-    expect(songPosition(w, 3)!.chord).toBe('F');
+    expect(songPosition(w, 0)!.chord.name).toBe('C');
+    expect(songPosition(w, 1)).toMatchObject({ chord: { name: 'G/B' }, next: { chord: { name: 'Am' }, inBeats: 1 } });
+    expect(songPosition(w, 2.9)!.chord.name).toBe('Am');
+    expect(songPosition(w, 3)!.chord.name).toBe('F');
   });
 });
 
@@ -225,7 +297,7 @@ describe('loops', () => {
     expect(c.sections[1]).toMatchObject({ times: 4, barCount: 16 });
     expect(c.sections[2].startBeat).toBe(plain.sections[2].startBeat + 8 * 4);
     expect(c.totalBeats).toBe(plain.totalBeats + 8 * 4);
-    expect(c.bars[c.sections[1].startBar + 12].chords).toEqual(['C']);
+    expect(c.bars[c.sections[1].startBar + 12].chords.map((ch) => ch.name)).toEqual(['C']);
   });
 });
 

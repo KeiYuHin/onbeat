@@ -6,3 +6,4 @@ export * from './sound';
 export * from './library';
 export * from './format';
 export * from './room';
+export * from './chord';
