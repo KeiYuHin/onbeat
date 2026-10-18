@@ -10,11 +10,14 @@ export type SoundSettings = SoundOptions & {
   latencyMs: number;
   /** Flash the chord panel on every beat (works with sound off). */
   flash: boolean;
+  bassTone: BassTone;
 };
+
+export type BassTone = 'bass' | 'sine';
 
 export const LATENCY_RANGE_MS = 300;
 
-const DEFAULTS: SoundSettings = { ...DEFAULT_SOUND_OPTIONS, enabled: false, volume: 0.8, latencyMs: 0, flash: false };
+const DEFAULTS: SoundSettings = { ...DEFAULT_SOUND_OPTIONS, enabled: false, volume: 0.8, latencyMs: 0, flash: false, bassTone: 'bass' };
 const KEY = 'onbeat.sound';
 
 function load(): SoundSettings {

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
 import { checkDrumPattern, compileSong, parseSong, type Song } from './song';
-import { DEFAULT_SOUND_OPTIONS, defaultDrumPattern, drumPresets, soundEvents, type SoundOptions } from './sound';
+import {
+  bassNote,
+  DEFAULT_SOUND_OPTIONS,
+  defaultDrumPattern,
+  drumPresets,
+  soundEvents,
+  type SoundOptions,
+} from './sound';
 
 const example = compileSong(parseSong(exampleJson));
 const opts = (o: Partial<SoundOptions>): SoundOptions => ({ ...DEFAULT_SOUND_OPTIONS, ...o });
@@ -100,5 +107,46 @@ describe('drum machine', () => {
 describe('drum presets', () => {
   it.each([3, 4, 5])('fit %i/4 bars', (bpb) => {
     for (const p of drumPresets(bpb)) expect(checkDrumPattern(p.pattern, bpb * 4)).toBeNull();
+  });
+});
+
+describe('root-note bass', () => {
+  it('maps chord names to a root (or slash bass) in the low bass range', () => {
+    expect(bassNote('E')).toBe(28);
+    expect(bassNote('C')).toBe(36);
+    expect(bassNote('Am7')).toBe(33);
+    expect(bassNote('F#m')).toBe(30);
+    expect(bassNote('Bb')).toBe(34);
+    expect(bassNote('G/B')).toBe(35);
+    expect(bassNote('Eb')).toBe(39);
+    expect(bassNote('N.C.')).toBeNull();
+    expect(bassNote('6m')).toBeNull();
+  });
+
+  it('plays eighths, quarters or one held note per chord', () => {
+    const bass = (rhythm: 0 | 1 | 2) =>
+      soundEvents(example, 0, 4, opts({ metronome: false, bass: true, bassRhythm: rhythm }));
+    expect(bass(2).map((e) => e.beat)).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5]);
+    expect(bass(1).every((e) => e.note === 36 && e.length === 1)).toBe(true);
+    expect(bass(0)).toEqual([{ beat: 0, sound: 'bass', gain: 1, note: 36, length: 4 }]);
+  });
+
+  it('splits bars with two chords, in 3/4 too', () => {
+    const song: Song = {
+      id: 's',
+      title: 's',
+      bpm: 90,
+      timeSignature: [3, 4],
+      sections: { a: { bars: [['C', 'G/B']] } },
+      form: ['a'],
+      parts: {},
+    };
+    const e = soundEvents(compileSong(song), 0, 3, opts({ metronome: false, bass: true, bassRhythm: 1 }));
+    expect(e.map((x) => [x.beat, x.note, x.length])).toEqual([
+      [0, 36, 1],
+      [1, 36, 0.5],
+      [1.5, 35, 1],
+      [2.5, 35, 0.5],
+    ]);
   });
 });

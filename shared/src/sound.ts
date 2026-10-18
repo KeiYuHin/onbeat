@@ -2,10 +2,13 @@
 // so every device derives the same events from the shared timeline. The web app schedules them.
 import { partDetail, type CompiledSong, type Drum, type DrumPattern } from './song';
 
-export type SoundName = Drum | 'click' | 'clickAccent';
-export type SoundEvent = { beat: number; sound: SoundName; gain: number };
+export type SoundName = Drum | 'click' | 'clickAccent' | 'bass';
+/** `note` (MIDI) and `length` (beats) are set for pitched sounds, i.e. the bass. */
+export type SoundEvent = { beat: number; sound: SoundName; gain: number; note?: number; length?: number };
 
 export type Subdivision = 1 | 2 | 4; // clicks per beat: quarter, eighth, sixteenth
+/** Bass notes per beat; 0 holds one note for each chord. */
+export type BassRhythm = 0 | 1 | 2;
 
 export type SoundOptions = {
   metronome: boolean;
@@ -15,6 +18,9 @@ export type SoundOptions = {
   drums: boolean;
   /** Fill in the last bar of each section and crash into the next one. */
   fills: boolean;
+  /** Root-note bass following the chords, for practising along. */
+  bass: boolean;
+  bassRhythm: BassRhythm;
 };
 
 export const DEFAULT_SOUND_OPTIONS: SoundOptions = {
@@ -23,7 +29,25 @@ export const DEFAULT_SOUND_OPTIONS: SoundOptions = {
   countIn: true,
   drums: false,
   fills: true,
+  bass: false,
+  bassRhythm: 2,
 };
+
+const PITCH_CLASSES: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+/** Lowest bass note, E1 (the open E string); roots land in E1..D#2. */
+const BASS_LOW = 28;
+
+/**
+ * MIDI note the bass plays for a chord: the slash bass if there is one (G/B → B), else the root.
+ * Null when the name doesn't start with a note letter (N.C., scale degrees).
+ */
+export function bassNote(chord: string): number | null {
+  const slash = chord.split('/')[1];
+  const m = /^([A-G])([#b]?)/.exec(slash ?? '') ?? /^([A-G])([#b]?)/.exec(chord);
+  if (!m) return null;
+  const pc = PITCH_CLASSES[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+  return BASS_LOW + ((((pc - 4) % 12) + 12) % 12);
+}
 
 const STEPS_PER_BEAT = 4;
 const ACCENT = 1;
@@ -127,7 +151,31 @@ export function soundEvents(c: CompiledSong, from: number, to: number, opts: Sou
     }
   }
 
+  if (opts.bass) bassEvents(events, c, songFrom, songTo, opts.bassRhythm);
+
   return sortEvents(events);
+}
+
+/** Root notes for each chord slot of the bars in the window: one held note per chord, or repeated per beat/eighth. */
+function bassEvents(events: SoundEvent[], c: CompiledSong, from: number, to: number, rhythm: BassRhythm) {
+  const bpb = c.beatsPerBar;
+  for (let b = Math.floor(from / bpb); b < c.bars.length && b * bpb < to; b++) {
+    const bar = c.bars[b];
+    const slot = bpb / bar.chords.length;
+    bar.chords.forEach((chord, i) => {
+      const note = bassNote(chord);
+      if (note === null) return;
+      const start = bar.startBeat + i * slot;
+      const end = start + slot;
+      const step = rhythm === 0 ? slot : 1 / rhythm;
+      // Integer step counters keep beats exact, as for the metronome.
+      for (let k = 0; start + k * step < end - 1e-9; k++) {
+        const beat = start + k * step;
+        if (beat < from || beat >= to) continue;
+        events.push({ beat, sound: 'bass', gain: k === 0 ? ACCENT : HIT, note, length: Math.min(step, end - beat) });
+      }
+    });
+  }
 }
 
 /** Two-beat fill: toms on eighths, then a sixteenth-note snare build. `step` counts sixteenths from 0 to 7. */

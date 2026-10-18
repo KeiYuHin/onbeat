@@ -1,10 +1,21 @@
-import type { Subdivision } from '@onbeat/shared';
-import { LATENCY_RANGE_MS, type SoundSettings } from './audio/settings';
+import type { BassRhythm, Subdivision } from '@onbeat/shared';
+import { LATENCY_RANGE_MS, type BassTone, type SoundSettings } from './audio/settings';
 
 const SUBDIVISIONS: [Subdivision, string][] = [
   [1, '四分'],
   [2, '八分'],
   [4, '十六分'],
+];
+
+const BASS_RHYTHMS: [BassRhythm, string][] = [
+  [0, '长音'],
+  [1, '四分'],
+  [2, '八分'],
+];
+
+const BASS_TONES: [BassTone, string][] = [
+  ['bass', '贝斯'],
+  ['sine', '正弦'],
 ];
 
 type Props = {
@@ -46,6 +57,33 @@ export function SoundPanel({ settings: s, onChange, onEnable, onEditDrums }: Pro
         <Toggle label="鼓机" on={s.drums} onClick={() => onChange({ drums: !s.drums })} />
         <Toggle label="段落加花" on={s.fills} disabled={!s.drums} onClick={() => onChange({ fills: !s.fills })} />
         {onEditDrums && <button onClick={onEditDrums}>编辑鼓谱（全房间）</button>}
+      </div>
+      <div className="row">
+        <Toggle label="根音贝斯" on={s.bass} onClick={() => onChange({ bass: !s.bass })} />
+        <div className="segmented">
+          {BASS_RHYTHMS.map(([n, label]) => (
+            <button
+              key={n}
+              className={s.bassRhythm === n ? 'selected' : ''}
+              disabled={!s.bass}
+              onClick={() => onChange({ bassRhythm: n })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="segmented">
+          {BASS_TONES.map(([tone, label]) => (
+            <button
+              key={tone}
+              className={s.bassTone === tone ? 'selected' : ''}
+              disabled={!s.bass}
+              onClick={() => onChange({ bassTone: tone })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       <Toggle label="闪屏" on={s.flash} onClick={() => onChange({ flash: !s.flash })} />
 

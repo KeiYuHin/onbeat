@@ -25,7 +25,18 @@ const DELTA_JUMP_S = 0.02;
 /** 'off': sound disabled here; 'locked': enabled but the browser needs a tap first; 'on': producing sound. */
 export type AudioStatus = 'off' | 'locked' | 'on';
 
-const SOUND_KEYS: (keyof SoundSettings)[] = ['enabled', 'metronome', 'subdivision', 'countIn', 'drums', 'fills', 'latencyMs'];
+const SOUND_KEYS: (keyof SoundSettings)[] = [
+  'enabled',
+  'metronome',
+  'subdivision',
+  'countIn',
+  'drums',
+  'fills',
+  'bass',
+  'bassRhythm',
+  'bassTone',
+  'latencyMs',
+];
 
 /**
  * Plays the metronome and drum machine for this device. Sound events come from the shared timeline
@@ -164,7 +175,7 @@ export class AudioEngine {
       for (const e of soundEvents(compiled, seg.beat, endBeat, settings)) {
         const perfMs = seg.from + (e.beat - seg.beat) * mpb - offset - settings.latencyMs;
         const at = perfMs / 1000 + delta;
-        if (at >= ctx.currentTime) this.play(ctx, e, at);
+        if (at >= ctx.currentTime) this.play(ctx, e, at, ((e.length ?? 0) * mpb) / 1000);
       }
     }
   }
@@ -186,11 +197,14 @@ export class AudioEngine {
     return this.delta;
   }
 
-  private play(ctx: AudioContext, e: SoundEvent, at: number) {
+  /** `seconds` is how long a pitched note lasts (the bass); drums and clicks ignore it. */
+  private play(ctx: AudioContext, e: SoundEvent, at: number, seconds: number) {
     const gain = ctx.createGain();
     gain.connect(this.master!);
     let node: AudioScheduledSourceNode;
-    if (e.sound === 'click' || e.sound === 'clickAccent') {
+    if (e.sound === 'bass') {
+      node = this.bassVoice(ctx, gain, e, at, seconds);
+    } else if (e.sound === 'click' || e.sound === 'clickAccent') {
       const osc = ctx.createOscillator();
       osc.frequency.value = e.sound === 'clickAccent' ? 1760 : 1175;
       gain.gain.setValueAtTime(0, at);
@@ -216,6 +230,36 @@ export class AudioEngine {
       this.pending.delete(entry);
       gain.disconnect();
     };
+  }
+
+  /**
+   * '贝斯': a low-passed sawtooth, so phone speakers (which can't play ~40–80Hz) still carry its harmonics.
+   * '正弦': a pure sine an octave up, clean in headphones.
+   */
+  private bassVoice(ctx: AudioContext, gain: GainNode, e: SoundEvent, at: number, seconds: number) {
+    const sine = this.settings?.bassTone === 'sine';
+    const note = e.note! + (sine ? 12 : 0);
+    const osc = ctx.createOscillator();
+    osc.type = sine ? 'sine' : 'sawtooth';
+    osc.frequency.value = 440 * 2 ** ((note - 69) / 12);
+    // Leave a small gap before the next note so repeated notes are heard as separate attacks.
+    const end = at + Math.max(0.05, seconds * 0.9);
+    const level = e.gain * (sine ? 0.7 : 0.45);
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(level, at + 0.008);
+    gain.gain.setTargetAtTime(level * 0.6, at + 0.008, 0.15);
+    gain.gain.setTargetAtTime(0, end, 0.015);
+    if (sine) osc.connect(gain);
+    else {
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 900;
+      filter.Q.value = 0.8;
+      osc.connect(filter).connect(gain);
+    }
+    osc.start(at);
+    osc.stop(end + 0.1);
+    return osc;
   }
 
   private async loadKit() {
