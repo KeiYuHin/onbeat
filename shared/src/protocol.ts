@@ -21,10 +21,22 @@ export type PlaybackState = {
   bpm: number;
   anchorServerTime: number; // server clock (ms)
   anchorBeat: number; // beat count at the anchor, from song start, 0-based
+  /** While set, reaching endBeat wraps back to startBeat (both on barlines). */
   loop?: { startBeat: number; endBeat: number };
   /** Sections played more times than written ("再绕一遍"); part of the timeline, so it lives here. */
   extraPasses?: ExtraPasses;
+  /**
+   * A change decided ahead of time, usually for the next barline: from `atServerTime` on, the position
+   * continues from `beat` (a seek; omitted to just carry on) at `bpm`. Broadcast before it happens, so every
+   * device switches at the same moment. Stays in the state after it fires until the next command folds it in.
+   */
+  jump?: Jump;
 };
+
+export type Jump = { atServerTime: number; beat?: number; bpm: number };
+
+export const MIN_BPM = 20;
+export const MAX_BPM = 300;
 
 /** Room-level song changes that are not saved to the song file yet. */
 export type RoomEdits = { songId: string; drums: DrumEdits };
@@ -37,6 +49,12 @@ export type Command =
   | { action: 'selectSong'; songId: string }
   /** One more pass of the section at this form index; refused once it is (almost) over. */
   | { action: 'repeatSection'; sectionIndex: number }
+  /** Go to a bar (0-based within the section at this form index). Playing: at the next barline. */
+  | { action: 'seek'; sectionIndex: number; bar: number }
+  /** Playing: at the next barline. */
+  | { action: 'setBpm'; bpm: number }
+  /** Loop the section at this form index (going there if needed), or stop looping with null. */
+  | { action: 'setLoop'; sectionIndex: number | null }
   /**
    * Replace the drum pattern for a section (sectionId null: the whole-song default). Pattern 'default'
    * makes the section follow the whole-song pattern; null undoes the room's edit.
@@ -61,6 +79,8 @@ export type ErrorCode =
   | 'not-in-room'
   | 'song-not-found'
   | 'too-late'
+  | 'looping'
+  | 'bad-position'
   | 'bad-pattern'
   | 'save-failed';
 
@@ -74,6 +94,7 @@ export type ServerMsg =
   | { type: 'edits'; edits: RoomEdits };
 
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
+const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
 
 /** Shape only; the server checks step counts and drum names against the song. */
 const isPatternShape = (p: unknown): p is DrumPattern =>
@@ -109,6 +130,12 @@ export function parseClientMsg(raw: string): ClientMsg | null {
         return { type: 'cmd', action: 'selectSong', songId: m.songId };
       if (m.action === 'repeatSection' && Number.isInteger(m.sectionIndex) && m.sectionIndex >= 0)
         return { type: 'cmd', action: 'repeatSection', sectionIndex: m.sectionIndex };
+      if (m.action === 'seek' && isIndex(m.sectionIndex) && isIndex(m.bar))
+        return { type: 'cmd', action: 'seek', sectionIndex: m.sectionIndex, bar: m.bar };
+      if (m.action === 'setBpm' && Number.isInteger(m.bpm) && m.bpm >= MIN_BPM && m.bpm <= MAX_BPM)
+        return { type: 'cmd', action: 'setBpm', bpm: m.bpm };
+      if (m.action === 'setLoop' && (m.sectionIndex === null || isIndex(m.sectionIndex)))
+        return { type: 'cmd', action: 'setLoop', sectionIndex: m.sectionIndex };
       if (
         m.action === 'setDrums' &&
         (m.sectionId === null || typeof m.sectionId === 'string') &&
