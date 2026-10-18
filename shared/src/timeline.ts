@@ -17,6 +17,11 @@ export function beatAt(state: PlaybackState, serverNow: number): number {
   return state.anchorBeat + (serverNow - state.anchorServerTime) / msPerBeat(state.bpm);
 }
 
+/** Inverse of `beatAt` while playing: the server time at which `beat` is reached. */
+export function serverTimeAtBeat(state: PlaybackState, beat: number): number {
+  return state.anchorServerTime + (beat - state.anchorBeat) * msPerBeat(state.bpm);
+}
+
 /**
  * Starts so that one count-in bar begins START_LEAD_MS from now and `startBeat` lands right after it.
  */
