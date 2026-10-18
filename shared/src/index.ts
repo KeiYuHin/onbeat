@@ -4,3 +4,4 @@ export * from './clock';
 export * from './song';
 export * from './sound';
 export * from './library';
+export * from './room';

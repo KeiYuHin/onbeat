@@ -7,25 +7,13 @@ import sirv from 'sirv';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   applyDrumEdits,
-  checkDrumPattern,
-  compileSong,
-  loadSong,
+  createRoom,
   parseClientMsg,
-  repeatSection,
-  resumeBeat,
-  seekTo,
-  setBpm,
-  setLoop,
-  startPlayback,
-  stopPlayback,
   type ClientMsg,
-  type Command,
-  type DrumEdits,
-  type ErrorCode,
-  type Member,
   type Part,
-  type PlaybackState,
-  type RoomEdits,
+  type Peer,
+  type Room,
+  type RoomHost,
   type ServerMsg,
   type SongLibrary,
 } from '@onbeat/shared';
@@ -43,17 +31,8 @@ export type ServerOptions = {
   emptyRoomTtlMs?: number;
 };
 
-type Room = {
-  code: string;
-  state: PlaybackState;
-  edits: RoomEdits;
-  members: Map<string, Member>;
-  conns: Set<Conn>;
-  expiry: NodeJS.Timeout | null;
-};
-
 type Conn = {
-  id: string;
+  peer: Peer;
   ws: WebSocket;
   room: Room | null;
   alive: boolean;
@@ -64,14 +43,28 @@ type Conn = {
 
 const HEARTBEAT_MS = 15_000;
 
+/** Serves every room from one process over `ws`; the room logic itself is `createRoom` in `shared`. */
 export async function startServer(opts: ServerOptions) {
   const { library, port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000 } = opts;
   let songs = await library.list(); // replaced when a song is saved
   if (songs.length === 0) throw new Error('at least one song is required');
-  const songById = new Map(songs.map((s) => [s.id, s]));
   const now = () => performance.now();
   const rooms = new Map<string, Room>();
+  const expiries = new Map<string, NodeJS.Timeout>();
   const conns = new Set<Conn>();
+
+  const roomHost: RoomHost = {
+    now,
+    songs: () => songs,
+    saveSong: library.save
+      ? async (songId, drums) => {
+          // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
+          const updated = await library.save!(songId, (raw) => applyDrumEdits(raw, drums));
+          songs = songs.map((s) => (s.id === songId ? updated : s));
+          for (const room of rooms.values()) room.broadcast({ type: 'songs', songs });
+        }
+      : undefined,
+  };
 
   const serveStatic = staticDir && existsSync(staticDir) ? sirv(staticDir, { single: true }) : null;
   const httpServer = http.createServer((req, res) => {
@@ -82,7 +75,7 @@ export async function startServer(opts: ServerOptions) {
 
   function delayed(conn: Conn, dir: 'lastIn' | 'lastOut', fn: () => void) {
     if (!latencyMs) return fn();
-    const at = Math.max(conn[dir], now() + latencyMs(conn.id));
+    const at = Math.max(conn[dir], now() + latencyMs(conn.peer.id));
     conn[dir] = at;
     setTimeout(fn, at - now());
   }
@@ -94,10 +87,6 @@ export async function startServer(opts: ServerOptions) {
     });
   }
 
-  function broadcast(room: Room, msg: ServerMsg) {
-    for (const c of room.conns) send(c, msg);
-  }
-
   function newRoomCode(): string {
     let code: string;
     do code = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -107,111 +96,23 @@ export async function startServer(opts: ServerOptions) {
 
   function enter(conn: Conn, room: Room, part: Part) {
     leave(conn);
-    if (room.expiry) clearTimeout(room.expiry);
-    room.expiry = null;
-    room.conns.add(conn);
-    room.members.set(conn.id, { id: conn.id, part });
+    clearTimeout(expiries.get(room.code));
+    expiries.delete(room.code);
     conn.room = room;
-    send(conn, { type: 'welcome', room: room.code, memberId: conn.id });
-    send(conn, { type: 'songs', songs });
-    send(conn, { type: 'state', state: room.state });
-    send(conn, { type: 'edits', edits: room.edits });
-    broadcast(room, { type: 'members', members: [...room.members.values()] });
+    room.join(conn.peer, part);
   }
 
   function leave(conn: Conn) {
     const room = conn.room;
     if (!room) return;
     conn.room = null;
-    room.conns.delete(conn);
-    room.members.delete(conn.id);
-    broadcast(room, { type: 'members', members: [...room.members.values()] });
-    if (room.conns.size === 0) {
-      room.expiry = setTimeout(() => rooms.delete(room.code), emptyRoomTtlMs);
-    }
-  }
-
-  type PlaybackCommand = Exclude<Command, { action: 'setDrums' | 'setDrumsAll' | 'saveSong' }>;
-
-  function applyCommand(state: PlaybackState, cmd: PlaybackCommand): PlaybackState | ErrorCode {
-    const t = now();
-    const song = songById.get(state.songId)!;
-    const compiled = compileSong(song, state.extraPasses);
-    const bpb = compiled.beatsPerBar;
-    switch (cmd.action) {
-      case 'start': {
-        // Picks up where it stopped (or where a seek put it), after a count-in.
-        const parked = stopPlayback(state, t);
-        return startPlayback(parked, t, { startBeat: resumeBeat(parked, compiled), beatsPerBar: bpb });
-      }
-      case 'stop':
-        return stopPlayback(state, t);
-      case 'selectSong': {
-        const next = songById.get(cmd.songId);
-        return next ? loadSong(next, t) : 'song-not-found';
-      }
-      case 'repeatSection':
-        // The loop's end is in beats, so growing a section under it would cut the loop short.
-        if (state.loop) return 'looping';
-        return repeatSection(state, compiled, cmd.sectionIndex, t) ?? 'too-late';
-      case 'seek': {
-        const section = compiled.sections[cmd.sectionIndex];
-        if (!section || cmd.bar >= section.barCount) return 'bad-position';
-        return seekTo(state, t, section.startBeat + cmd.bar * bpb, bpb);
-      }
-      case 'setBpm':
-        return setBpm(state, t, cmd.bpm, bpb);
-      case 'setLoop': {
-        if (cmd.sectionIndex === null) return setLoop(state, t, null, bpb);
-        const section = compiled.sections[cmd.sectionIndex];
-        if (!section) return 'bad-position';
-        return setLoop(state, t, { startBeat: section.startBeat, endBeat: section.startBeat + section.barCount * bpb }, bpb);
-      }
-    }
-  }
-
-  function setDrums(room: Room, cmd: Extract<Command, { action: 'setDrums' | 'setDrumsAll' }>): ErrorCode | null {
-    const song = songById.get(room.state.songId)!;
-    const pattern = cmd.pattern;
-    if (pattern && pattern !== 'default' && checkDrumPattern(pattern, song.timeSignature[0] * 4)) return 'bad-pattern';
-    let drums: DrumEdits;
-    if (cmd.action === 'setDrumsAll') {
-      // Sections with a pattern of their own in the song are told to follow the new default instead.
-      const own = Object.entries(song.parts.drums?.sections ?? {}).filter(([, d]) => typeof d.pattern === 'object');
-      drums = { default: cmd.pattern, sections: Object.fromEntries(own.map(([id]) => [id, 'default' as const])) };
-    } else {
-      if (cmd.sectionId !== null && !(cmd.sectionId in song.sections)) return 'bad-pattern';
-      const { default: def, sections = {} } = room.edits.drums;
-      drums = { ...(def && { default: def }), sections: { ...sections } };
-      if (cmd.sectionId === null) {
-        if (pattern && pattern !== 'default') drums.default = pattern;
-        else delete drums.default;
-      } else if (pattern) drums.sections![cmd.sectionId] = pattern;
-      else delete drums.sections![cmd.sectionId];
-    }
-    room.edits = { songId: song.id, drums };
-    broadcast(room, { type: 'edits', edits: room.edits });
-    return null;
-  }
-
-  async function save(room: Room): Promise<ErrorCode | null> {
-    const { songId, drums } = room.edits;
-    if (!library.save) return 'save-failed';
-    try {
-      // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
-      const updated = await library.save(songId, (raw) => applyDrumEdits(raw, drums));
-      songById.set(songId, updated);
-      songs = songs.map((s) => (s.id === songId ? updated : s));
-    } catch (e) {
-      console.error(`saving song "${songId}" failed:`, e);
-      return 'save-failed';
-    }
-    for (const c of conns) if (c.room) send(c, { type: 'songs', songs });
-    if (room.edits.songId === songId) {
-      room.edits = { songId, drums: {} };
-      broadcast(room, { type: 'edits', edits: room.edits });
-    }
-    return null;
+    room.leave(conn.peer.id);
+    if (room.size > 0) return;
+    const timer = setTimeout(() => {
+      rooms.delete(room.code);
+      expiries.delete(room.code);
+    }, emptyRoomTtlMs);
+    expiries.set(room.code, timer);
   }
 
   function handle(conn: Conn, msg: ClientMsg) {
@@ -219,16 +120,8 @@ export async function startServer(opts: ServerOptions) {
       case 'ping':
         return send(conn, { type: 'pong', c0: msg.c0, serverTime: now() });
       case 'create': {
-        const code = newRoomCode();
-        const room: Room = {
-          code,
-          state: loadSong(songs[0], now()),
-          edits: { songId: songs[0].id, drums: {} },
-          members: new Map(),
-          conns: new Set(),
-          expiry: null,
-        };
-        rooms.set(code, room);
+        const room = createRoom(newRoomCode(), roomHost);
+        rooms.set(room.code, room);
         return enter(conn, room, msg.part);
       }
       case 'join': {
@@ -236,33 +129,14 @@ export async function startServer(opts: ServerOptions) {
         if (!room) return send(conn, { type: 'error', code: 'room-not-found' });
         return enter(conn, room, msg.part);
       }
-      case 'setPart': {
-        const room = conn.room;
-        if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
-        room.members.set(conn.id, { id: conn.id, part: msg.part });
-        return broadcast(room, { type: 'members', members: [...room.members.values()] });
-      }
-      case 'cmd': {
-        const room = conn.room;
-        if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
-        const fail = (code: ErrorCode | null) => code && send(conn, { type: 'error', code });
-        if (msg.action === 'setDrums' || msg.action === 'setDrumsAll') return fail(setDrums(room, msg));
-        if (msg.action === 'saveSong') return void save(room).then(fail);
-        const next = applyCommand(room.state, msg);
-        if (typeof next === 'string') return fail(next);
-        room.state = next;
-        broadcast(room, { type: 'state', state: room.state });
-        if (msg.action === 'selectSong') {
-          room.edits = { songId: next.songId, drums: {} };
-          broadcast(room, { type: 'edits', edits: room.edits });
-        }
-        return;
-      }
+      default:
+        if (!conn.room) return send(conn, { type: 'error', code: 'not-in-room' });
+        return conn.room.handle(conn.peer.id, msg);
     }
   }
 
   wss.on('connection', (ws) => {
-    const conn: Conn = { id: randomUUID(), ws, room: null, alive: true, lastIn: 0, lastOut: 0 };
+    const conn: Conn = { peer: { id: randomUUID(), send: (msg) => send(conn, msg) }, ws, room: null, alive: true, lastIn: 0, lastOut: 0 };
     conns.add(conn);
     ws.on('pong', () => (conn.alive = true));
     ws.on('message', (data) => {
@@ -297,7 +171,7 @@ export async function startServer(opts: ServerOptions) {
     port: (httpServer.address() as AddressInfo).port,
     async close() {
       clearInterval(heartbeat);
-      for (const room of rooms.values()) if (room.expiry) clearTimeout(room.expiry);
+      for (const timer of expiries.values()) clearTimeout(timer);
       for (const ws of wss.clients) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

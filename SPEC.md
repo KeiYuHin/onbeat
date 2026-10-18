@@ -254,7 +254,7 @@ interface SongLibrary {
 - 地址先用 `*.workers.dev`（乐队在加拿大，可以直接访问），HTTPS 自带，iOS Wake Lock 可用。以后要短一点的链接再买域名。
 - 公开仓库的 GitHub Action 在 push 到 main 时部署 Worker（`CLOUDFLARE_API_TOKEN` 放 repo secrets）。
 - `npm run server`（Node + `ws`）保留，作为排练室没网时的局域网模式。
-- 房间逻辑拆成与传输无关的 `room.ts`，外面两个适配器：Node `ws` 和 Durable Object。现有的模拟测试继续跑 Node 这一侧。
+- 房间逻辑拆成与传输无关的 `shared/src/room.ts`（`createRoom`，已完成），外面两个适配器：Node `ws`（`server.ts`，已完成）和 Durable Object。一个房间对象只管一个房间；时间、曲库和保存由宿主注入；房间号分配、空房间过期、心跳归传输层管。现有的模拟测试继续跑 Node 这一侧。
 - DO 的注意事项：
   - Workers 里 `performance.now()` 不是单调时钟，同步代码执行期间也不前进；DO 休眠后内存清空。所以 **DO 侧用 `Date.now()` 作为服务端时间**（这是"不用 `Date.now()`"规则的唯一例外，只限 DO），房间状态写进 DO storage，唤醒后恢复。
   - 心跳改成客户端 ping，DO 用自动应答回复，不为心跳唤醒 DO。时钟同步的 ping 仍由 DO 处理。
