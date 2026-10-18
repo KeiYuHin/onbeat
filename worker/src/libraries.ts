@@ -129,8 +129,10 @@ function r2Library(env: LibraryEnv, name: string, fetchFn: typeof fetch): Catalo
 
     const raw = edit(JSON.parse(entry.text));
     const song = parseSong(raw);
+    // Compare content, not text: the file's own layout (hand-wrapped bars, say) isn't formatJson's,
+    // so re-serializing an unchanged song would otherwise commit a pure reformat.
+    if (JSON.stringify(raw) === JSON.stringify(JSON.parse(entry.text))) return song;
     const text = formatJson(raw) + '\n';
-    if (text === entry.text.replace(/\r\n/g, '\n')) return song; // nothing to commit
 
     const by = [meta?.device, meta?.room && `房间 ${meta.room}`].filter(Boolean).join('，');
     const put = await fetchFn(api, {

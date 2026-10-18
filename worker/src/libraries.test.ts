@@ -145,11 +145,17 @@ describe('R2 library', () => {
     );
   });
 
-  it('skips the commit when nothing changed', async () => {
-    const { library, calls } = setup();
+  it('skips the commit when nothing changed, even if the file is laid out by hand', async () => {
+    const { library, bucket, calls, setRemote } = setup();
+    // Bars wrapped by hand: not formatJson's layout, but the same song.
+    const handWritten = SONG_TEXT.replace('"loop": [["C"], ["G"]]', '"loop": [\n        ["C"], ["G"]\n      ]');
+    expect(handWritten).not.toBe(SONG_TEXT);
+    bucket.objects.set('band/songs/tune.json', { text: handWritten, etag: 'hand' });
+    setRemote(handWritten);
     await library.list();
     await library.save!('tune', (raw) => raw);
     expect(calls.map((c) => c.method)).toEqual(['GET']);
+    expect(bucket.objects.get('band/songs/tune.json')!.text).toBe(handWritten);
   });
 });
 
