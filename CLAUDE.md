@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OnBeat is a PWA for band rehearsal. Each member opens a shared 6-digit room on their own phone and picks a part (guitar1 / guitar2 / bass / drums / keys). Any member can start or stop, and every device shows the same bar and beat, all driven by one shared clock. `SPEC.md` (written in Chinese) is the source of truth for scope, the sync model, the song format and the milestones. Read it before starting a milestone.
 
-Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 is done and is waiting for phone testing.
+Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 is done and is waiting for phone testing.
 
 ## Commands
 
@@ -44,7 +44,8 @@ Anything that moves in time is a function of `beatAt(state, clock.serverNow())`,
 
 ## Constraints from the spec
 
-- Example songs hold chords and structure only. **Never include lyrics.**
+- Lyrics are an optional song field (personal project, local use).
+- The scale-degree (级数谱) section of the spec is a proposal: **confirm the design with the user before implementing any of it**, including degree-based chord storage, key changes and cues.
 - Out of MVP scope: accounts, audio backing tracks, native apps. No DB and no login. Songs are JSON in the repo.
 - Record third-party dependency licenses (alphaTab etc.) in `README.md`.
 - The UI is in Chinese and uses large type, readable from about 1m. It must work in both portrait and landscape.

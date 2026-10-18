@@ -33,7 +33,7 @@ OnBeat server listening on port 8787
 
 ## Adding songs
 
-Put one JSON file per song in `songs/` (format in `SPEC.md`; `songs/example-song.json` is a template). Restart `npm run server` to pick it up (`npm run dev` reloads automatically). A broken file stops the server with a message naming the file and the problem. Chords and structure only: never add lyrics.
+Put one JSON file per song in `songs/` (format in `SPEC.md`; `songs/example-song.json` is a template). Restart `npm run server` to pick it up (`npm run dev` reloads automatically). A broken file stops the server with a message naming the file and the problem.
 
 If phones can't connect: Windows Firewall may block Node the first time it runs. Allow it on **private networks** when prompted, or add an inbound rule for TCP 8787.
 
