@@ -2,7 +2,7 @@
 
 Band rehearsal sync: each member sees their own part on their own phone, and everyone moves through the same bar and beat on one shared clock. See `SPEC.md` for the full design.
 
-Current milestone: **M2.5 metronome + drum machine**. Each device shows the song, section, bar and beat, the current and next chord, and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Any device can also play a click and/or a 16-step drum machine, locked to the same shared clock.
+Current milestone: **M2.5 metronome + drum machine**. Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Any device can also play a click and/or a 16-step drum machine, locked to the same shared clock.
 
 ## Run locally (rehearsal-room laptop)
 
@@ -29,6 +29,16 @@ OnBeat server listening on port 8787
 4. On the other devices, pick a part, enter the code, and tap **加入** (join).
 5. Anyone can tap **开始** (start). After about 1.5s comes a one-bar count-in (预备), then the song plays from the top on every device. Beat dots at the top right flash orange on the downbeat and blue on the other beats.
 
+### Loop view and 再绕一遍
+
+The middle panel shows one pass of the current section as bar cards (for example C Am F G), with the cursor going round them and **第 2 / 4 遍** at the top right. A section written as 8 bars that is really 4 bars twice is detected automatically. On the last pass the counter turns orange (**最后一遍**) and the next section is previewed underneath (下一段：副歌 · F G C Am).
+
+**再绕一遍** adds one more pass of the current section for everyone, for when the band decides on the spot to go round again. It is refused in the section's last beat (too late to reach every phone in time). A fresh 开始 plays the song as written again.
+
+### Drum machine editor (whole room)
+
+Open it from **编辑鼓谱** (drummer's part panel, or the sound settings). Pick 全曲默认 or a section, start from a preset (基本 8beat, 抒情 4beat, 16beat, 摇滚, Disco, 放克, 雷鬼, 华尔兹…), and tap cells to cycle empty → hit → accent. Every change syncs to the whole room immediately, so the device on the speaker plays it right away. Changes last as long as the room stays on that song; **保存到歌曲文件** writes them into `songs/<song>.json` on the laptop.
+
 ### Sound (per device)
 
 Tap **🔊 声音** in the top bar. Settings are stored on each device and never synced.
@@ -46,6 +56,8 @@ Browsers only start audio from a tap. If sound was on last time, you'll see 点�
 ## Adding songs
 
 Put one JSON file per song in `songs/` (format in `SPEC.md`; `songs/example-song.json` is a template). Restart `npm run server` to pick it up (`npm run dev` reloads automatically). A broken file stops the server with a message naming the file and the problem.
+
+A section that repeats can be written as a loop: `"verse": { "loop": [["C"], ["Am"], ["F"], ["G"]], "times": 4 }` is the same as writing the 16 bars out. Saving from the drum editor keeps this notation and the rest of the file's layout.
 
 Drum machine patterns go in the `drums` part, one step per sixteenth note (16 steps in 4/4, 12 in 3/4); `x` hit, `X` accent, `.` rest. Instruments: `kick snare hat crash ride tom`. Put a different `pattern` under `sections` for e.g. the chorus:
 
