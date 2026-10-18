@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { applyDrumEdits } from '@onbeat/shared';
+import { memoryLibrary } from '@onbeat/shared';
 import { startServer } from './server';
 import { TEST_SONGS, TestClient } from './testClient';
 
@@ -12,7 +12,7 @@ const connect = async () => {
 };
 
 beforeEach(async () => {
-  server = await startServer({ songs: TEST_SONGS, port: 0, emptyRoomTtlMs: 50 });
+  server = await startServer({ library: memoryLibrary(TEST_SONGS), port: 0, emptyRoomTtlMs: 50 });
 });
 afterEach(async () => {
   clients.splice(0).forEach((c) => c.close());
@@ -140,7 +140,7 @@ describe('rehearsal edits', () => {
 
   it('seeks, loops and changes tempo for everyone, and starts from where a seek left it', async () => {
     await server.close();
-    server = await startServer({ songs: [TEST_SONGS[1]], port: 0 }); // waltz: two 2-bar sections in 3/4
+    server = await startServer({ library: memoryLibrary([TEST_SONGS[1]]), port: 0 }); // waltz: two 2-bar sections in 3/4
     const [a, b] = await inRoom();
     a.send({ type: 'cmd', action: 'seek', sectionIndex: 1, bar: 1 });
     expect((await b.next('state')).state).toMatchObject({ playing: false, anchorBeat: 9 });
@@ -180,7 +180,7 @@ describe('rehearsal edits', () => {
     await server.close();
     const own = { kick: 'x'.repeat(16) };
     const songs = [{ ...TEST_SONGS[0], parts: { drums: { label: '鼓', default: {}, sections: { a: { pattern: own } } } } }];
-    server = await startServer({ songs, port: 0 });
+    server = await startServer({ library: memoryLibrary(songs), port: 0 });
     const [a, b] = await inRoom();
     const pattern = { snare: '....x.......x...' };
     a.send({ type: 'cmd', action: 'setDrums', sectionId: 'a', pattern });
@@ -191,17 +191,10 @@ describe('rehearsal edits', () => {
     expect((await a.next('error')).code).toBe('bad-message');
   });
 
-  it('saves edits through the hook and sends everyone the updated song', async () => {
+  it('saves edits into the library and sends everyone the updated song', async () => {
     await server.close();
-    const saved: unknown[] = [];
-    server = await startServer({
-      songs: TEST_SONGS,
-      port: 0,
-      saveSong: (songId, drums) => {
-        saved.push([songId, drums]);
-        return applyDrumEdits(TEST_SONGS.find((s) => s.id === songId)!, drums);
-      },
-    });
+    const library = memoryLibrary(TEST_SONGS);
+    server = await startServer({ library, port: 0 });
     const [a, b] = await inRoom();
     const pattern = { snare: '....x.......x...' };
     a.send({ type: 'cmd', action: 'setDrums', sectionId: null, pattern });
@@ -210,10 +203,12 @@ describe('rehearsal edits', () => {
     const { songs } = await b.next('songs', (m) => !!m.songs[0].parts.drums);
     expect(songs[0].parts.drums?.default.pattern).toEqual(pattern);
     expect((await b.next('edits')).edits.drums).toEqual({});
-    expect(saved).toEqual([['four', { default: pattern, sections: {} }]]);
+    expect((await library.list())[0].parts.drums?.default.pattern).toEqual(pattern);
   });
 
-  it('fails to save without a hook', async () => {
+  it('fails to save to a read-only library', async () => {
+    await server.close();
+    server = await startServer({ library: { list: async () => TEST_SONGS }, port: 0 });
     const [a] = await inRoom();
     a.send({ type: 'cmd', action: 'saveSong' });
     expect((await a.next('error')).code).toBe('save-failed');

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyDrumEdits, parseSong, type DrumEdits, type Song } from '@onbeat/shared';
+import { parseSong, type Song, type SongLibrary } from '@onbeat/shared';
 
 /** A song as loaded, plus the JSON exactly as written, so saving keeps `loop` notation and unknown fields. */
 export type SongFile = { song: Song; raw: any; path: string };
@@ -29,15 +29,26 @@ export function loadSongFiles(dir: string): SongFile[] {
 
 export const loadSongs = (dir: string): Song[] => loadSongFiles(dir).map((f) => f.song);
 
-/** Writes drum edits into the song's file (atomically) and returns the updated entry. */
-export function saveDrumEdits(file: SongFile, edits: DrumEdits): SongFile {
-  // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
-  const raw = applyDrumEdits(file.raw, edits);
-  const song = parseSong(raw);
-  const tmp = `${file.path}.tmp`;
-  writeFileSync(tmp, formatJson(raw) + '\n');
-  renameSync(tmp, file.path);
-  return { song, raw, path: file.path };
+/** The songs in `dir`, loaded once (failing loudly like `loadSongFiles`). Saves rewrite the file atomically. */
+export function fsLibrary(dir: string): SongLibrary {
+  const files = new Map(loadSongFiles(dir).map((f) => [f.song.id, f]));
+  return {
+    async list() {
+      return [...files.values()].map((f) => f.song);
+    },
+    async save(songId, edit) {
+      const file = files.get(songId);
+      if (!file) throw new Error(`no song "${songId}"`);
+      const raw = edit(structuredClone(file.raw));
+      const song = parseSong(raw);
+      const tmp = `${file.path}.tmp`;
+      writeFileSync(tmp, formatJson(raw) + '\n');
+      renameSync(tmp, file.path);
+      files.set(songId, { song, raw, path: file.path });
+      console.log(`saved ${file.path}`);
+      return song;
+    },
+  };
 }
 
 const MAX_INLINE = 100;

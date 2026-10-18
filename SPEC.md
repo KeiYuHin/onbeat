@@ -237,15 +237,16 @@ type Chord = {
 - 别人 fork 项目后，换成自己的 `SONGS_DIR` 或自己的 R2 bucket 就能用自己的谱。
 
 ### 2. 曲库接口
-server 不直接读文件，只认一个接口（替换现在的 `songs` 数组和 `saveSong` 钩子）：
+server 不直接读文件，只认一个接口（`shared/src/library.ts`，已实现）：
 ```ts
 interface SongLibrary {
   list(): Promise<Song[]>;
-  save?(songId: string, raw: unknown): Promise<Song>;      // 没有就是只读
-  asset?(songId: string, name: string): Promise<Response>; // GP/PDF，M4 起
+  save?(songId: string, edit: (raw: any) => unknown): Promise<Song>; // 没有就是只读
+  asset?(songId: string, name: string): Promise<Response>;           // GP/PDF，M4 起再加
 }
 ```
-实现：`FsLibrary`（本地/局域网，现在的 `songs.ts`）、`R2Library`（Cloudflare）、内存版（测试）。M4 编辑器和 M4.5 导入只通过这个接口读写谱。
+- `save` 传的是"对原始 JSON 的修改函数"，不是整份新 JSON：曲库用自己读到的原文（和 sha）去改，所以 `loop` 记号和未知字段都保留；鼓谱保存是 `raw => applyDrumEdits(raw, drums)`，M4 编辑器整份替换就是 `() => newRaw`。改完先用 `parseSong` 校验，不通过就不写
+- 实现：`fsLibrary`（本地/局域网，`server/src/songs.ts`）、`memoryLibrary`（测试，`shared`）、`R2Library`（Cloudflare，待做）。M4 编辑器和 M4.5 导入只通过这个接口读写谱。
 
 ### 3. 部署：Cloudflare Workers
 - 一个 Worker：`web/dist` 作为静态资源；`/ws` 按房间转给 **Durable Object**（一个房间一个 DO），用 WebSocket Hibernation，没消息时不占内存、连接不断。

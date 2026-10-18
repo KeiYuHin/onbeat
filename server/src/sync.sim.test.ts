@@ -1,6 +1,6 @@
 // Simulation from SPEC.md: with 50–300ms network delay, two clients' beat positions agree within 20ms.
 import { afterEach, expect, it } from 'vitest';
-import { beatAt, msPerBeat } from '@onbeat/shared';
+import { beatAt, memoryLibrary, msPerBeat } from '@onbeat/shared';
 import { startServer } from './server';
 import { TEST_SONGS, TestClient } from './testClient';
 
@@ -41,7 +41,7 @@ function errorMs(a: TestClient, b: TestClient): number {
 it(
   'keeps two clients and a late joiner within 20ms under 50–300ms latency',
   async () => {
-    server = await startServer({ songs: TEST_SONGS, port: 0, latencyMs });
+    server = await startServer({ library: memoryLibrary(TEST_SONGS), port: 0, latencyMs });
 
     const a = await connect();
     a.send({ type: 'create', part: 'guitar1' });

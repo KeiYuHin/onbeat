@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 import sirv from 'sirv';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
+  applyDrumEdits,
   checkDrumPattern,
   compileSong,
   loadSong,
@@ -26,12 +27,12 @@ import {
   type PlaybackState,
   type RoomEdits,
   type ServerMsg,
-  type Song,
+  type SongLibrary,
 } from '@onbeat/shared';
 
 export type ServerOptions = {
-  /** The song catalog; at least one. New rooms start on the first. */
-  songs: Song[];
+  /** The song catalog (at least one song) and where saves go. Saving fails if it has no `save`. */
+  library: SongLibrary;
   port?: number;
   host?: string;
   /** Built web app to serve on the same port, so phones need only one URL. */
@@ -40,8 +41,6 @@ export type ServerOptions = {
   latencyMs?: (connId: string) => number;
   /** How long an empty room survives, so a phone that reloads can rejoin. */
   emptyRoomTtlMs?: number;
-  /** Persists a room's drum edits into the song file and returns the updated song. Without it, saving fails. */
-  saveSong?: (songId: string, drums: DrumEdits) => Song | Promise<Song>;
 };
 
 type Room = {
@@ -66,9 +65,9 @@ type Conn = {
 const HEARTBEAT_MS = 15_000;
 
 export async function startServer(opts: ServerOptions) {
-  const { port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000, saveSong } = opts;
-  if (opts.songs.length === 0) throw new Error('at least one song is required');
-  let songs = opts.songs; // replaced when a song is saved
+  const { library, port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000 } = opts;
+  let songs = await library.list(); // replaced when a song is saved
+  if (songs.length === 0) throw new Error('at least one song is required');
   const songById = new Map(songs.map((s) => [s.id, s]));
   const now = () => performance.now();
   const rooms = new Map<string, Room>();
@@ -197,9 +196,10 @@ export async function startServer(opts: ServerOptions) {
 
   async function save(room: Room): Promise<ErrorCode | null> {
     const { songId, drums } = room.edits;
-    if (!saveSong) return 'save-failed';
+    if (!library.save) return 'save-failed';
     try {
-      const updated = await saveSong(songId, drums);
+      // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
+      const updated = await library.save(songId, (raw) => applyDrumEdits(raw, drums));
       songById.set(songId, updated);
       songs = songs.map((s) => (s.id === songId ? updated : s));
     } catch (e) {
