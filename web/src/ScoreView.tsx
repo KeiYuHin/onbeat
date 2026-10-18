@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import {
   barPosition,
   beatAt,
+  DRUMS,
   partDetail,
   songPosition,
   strumIndex,
   type ClockSync,
   type CompiledSong,
+  type Drum,
+  type DrumPattern,
   type Part,
   type PartDetail,
   type PlaybackState,
@@ -14,10 +17,10 @@ import {
 
 const STRUM_GLYPHS: Record<string, string> = { D: '↓', U: '↑', '-': '·' };
 
-type Props = { clock: ClockSync; playback: PlaybackState; compiled: CompiledSong; part: Part };
+type Props = { clock: ClockSync; playback: PlaybackState; compiled: CompiledSong; part: Part; flash: boolean };
 
 /** Re-renders every animation frame; everything shown is derived from the shared clock, never counted locally. */
-export function ScoreView({ clock, playback, compiled, part }: Props) {
+export function ScoreView({ clock, playback, compiled, part, flash }: Props) {
   const [, setFrame] = useState(0);
   useEffect(() => {
     let id = requestAnimationFrame(function tick() {
@@ -40,6 +43,7 @@ export function ScoreView({ clock, playback, compiled, part }: Props) {
   const live = playback.playing && !!pos;
   const { beatInBar, phase } = barPosition(beat, beatsPerBar);
   const ticking = playback.playing && !waiting && !ended;
+  const beatFlash = flash && ticking && phase < 0.12;
   const detail = shown && partDetail(song, part, shown.section.id);
   const spec = song.parts[part];
 
@@ -62,7 +66,7 @@ export function ScoreView({ clock, playback, compiled, part }: Props) {
         <Dots count={beatsPerBar} current={ticking ? beatInBar : 0} flash={ticking && phase < 0.15} />
       </div>
 
-      <div className="chord-panel">
+      <div className={`chord-panel${beatFlash ? (beatInBar === 1 ? ' flash accent' : ' flash') : ''}`}>
         <div className={`chord${live ? '' : ' dim'}`}>{shown?.chord ?? '—'}</div>
         {shown?.next && (
           <div className="next">
@@ -128,6 +132,39 @@ function PartDetails({ detail, beatInSection }: { detail: PartDetail; beatInSect
       )}
       {typeof pattern === 'string' && <div className="detail">{pattern}</div>}
       {groove && <div className="detail">{groove}</div>}
+      {typeof pattern === 'object' && <DrumGrid pattern={pattern} beatInSection={beatInSection} />}
     </>
+  );
+}
+
+const DRUM_LABELS: Record<Drum, string> = {
+  kick: '底鼓',
+  snare: '军鼓',
+  hat: '踩镲',
+  crash: '吊镲',
+  ride: '叮叮',
+  tom: '通鼓',
+};
+
+/** Step-sequencer view of the section's drum pattern, highlighting the current sixteenth. */
+function DrumGrid({ pattern, beatInSection }: { pattern: DrumPattern; beatInSection: number | null }) {
+  const rows = DRUMS.filter((d) => pattern[d]);
+  const steps = pattern[rows[0]]?.length ?? 0;
+  // Sections start on a barline, so this is also the step within the current bar.
+  const current = beatInSection === null || !steps ? -1 : Math.floor(beatInSection * 4) % steps;
+  return (
+    <div className="drum-grid">
+      {rows.map((d) => (
+        <div key={d} className="drum-row">
+          <span className="drum-name">{DRUM_LABELS[d]}</span>
+          {[...pattern[d]!].map((hit, i) => (
+            <span
+              key={i}
+              className={`step${hit === '.' ? '' : hit === 'X' ? ' hit accent' : ' hit'}${i === current ? ' current' : ''}${i % 4 === 0 ? ' beat' : ''}`}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
