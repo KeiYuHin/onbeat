@@ -5,6 +5,7 @@ import {
   type Member,
   type Part,
   type PlaybackState,
+  type RoomEdits,
   type ServerMsg,
   type Song,
 } from '@onbeat/shared';
@@ -16,12 +17,16 @@ export type Snapshot = {
   members: Member[];
   playback: PlaybackState | null;
   songs: Song[];
+  /** Unsaved drum edits shared by the room. */
+  edits: RoomEdits | null;
   error: ErrorCode | null;
 };
 
 export type RoomTarget = { room: string } | { create: true };
 
 const RECONNECT_MS = 1000;
+/** Errors from a single command (e.g. too late to repeat) fade out; losing the room does not. */
+const TRANSIENT_ERROR_MS = 4000;
 
 /**
  * One room session: the socket (reconnecting on drop, e.g. when a phone wakes), clock sync,
@@ -39,8 +44,10 @@ export class RoomConnection {
     members: [],
     playback: null,
     songs: [],
+    edits: null,
     error: null,
   };
+  private errorTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     target: RoomTarget,
@@ -63,6 +70,7 @@ export class RoomConnection {
 
   close() {
     this.closed = true;
+    clearTimeout(this.errorTimer);
     this.clock.stop();
     this.ws?.close();
   }
@@ -109,7 +117,12 @@ export class RoomConnection {
         return this.update({ members: msg.members });
       case 'songs':
         return this.update({ songs: msg.songs });
+      case 'edits':
+        return this.update({ edits: msg.edits });
       case 'error':
+        clearTimeout(this.errorTimer);
+        if (msg.code !== 'room-not-found')
+          this.errorTimer = setTimeout(() => this.update({ error: null }), TRANSIENT_ERROR_MS);
         return this.update({ error: msg.code });
     }
   }
