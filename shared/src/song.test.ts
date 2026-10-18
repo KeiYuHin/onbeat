@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import exampleJson from '../../songs/example-song.json';
+import exampleJson from './fixtures/example-song.json';
 import {
   applyDrumEdits,
   checkDrumPattern,
@@ -177,6 +177,16 @@ describe('drum edits', () => {
     expect(partDetail(song, 'drums', 'verse')?.pattern).toEqual({ snare: 'x'.repeat(16) });
     expect(partDetail(song, 'drums', 'chorus')?.pattern).toHaveProperty('ride');
     expect(partDetail(example, 'drums', 'intro')?.pattern).not.toEqual(pattern);
+  });
+
+  it('lets a section drop its own pattern and follow the default', () => {
+    const song = applyDrumEdits(example, { default: pattern, sections: { chorus: 'default' } });
+    expect(partDetail(song, 'drums', 'chorus')).toEqual({ groove: '8beat + 叮叮镲', pattern });
+    const bare = applyDrumEdits(
+      { ...example, parts: { drums: { label: '鼓', default: {}, sections: { chorus: { pattern } } } } },
+      { sections: { chorus: 'default', verse: 'default' } },
+    );
+    expect(bare.parts.drums).toEqual({ label: '鼓', default: {} });
   });
 
   it('creates a drums part when the song has none', () => {

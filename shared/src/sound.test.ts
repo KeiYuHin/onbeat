@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import exampleJson from '../../songs/example-song.json';
+import exampleJson from './fixtures/example-song.json';
 import { checkDrumPattern, compileSong, parseSong, type Song } from './song';
 import { DEFAULT_SOUND_OPTIONS, defaultDrumPattern, drumPresets, soundEvents, type SoundOptions } from './sound';
 

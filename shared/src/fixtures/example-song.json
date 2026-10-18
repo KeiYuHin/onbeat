@@ -1,0 +1,32 @@
+{
+  "id": "example-song",
+  "title": "示例：C-Am-F-G 循环",
+  "bpm": 120,
+  "timeSignature": [4, 4],
+  "key": "C",
+  "sections": {
+    "intro": { "bars": [["C"], ["Am"], ["F"], ["G"]] },
+    "verse": { "bars": [["C"], ["Am"], ["F"], ["G"], ["C"], ["Am"], ["F"], ["G"]] },
+    "chorus": { "bars": [["F"], ["G"], ["C"], ["Am"], ["F"], ["G"], ["C"], ["C"]] }
+  },
+  "form": ["intro", "verse", "chorus", "verse", "chorus", "chorus"],
+  "parts": {
+    "guitar1": { "label": "吉他1", "default": { "strum": "D-DU-UDU" }, "notes": "主歌轻扫，副歌全扫" },
+    "guitar2": { "label": "吉他2", "default": { "pattern": "分解 5-3-2-3" } },
+    "bass": { "label": "贝斯", "default": { "pattern": "根音八分" } },
+    "drums": {
+      "label": "鼓",
+      "default": {
+        "groove": "基本 8beat",
+        "pattern": { "kick": "x.......x.x.....", "snare": "....x.......x...", "hat": "x.x.x.x.x.x.x.x." }
+      },
+      "sections": {
+        "chorus": {
+          "groove": "8beat + 叮叮镲",
+          "pattern": { "kick": "x.....x.x.x.....", "snare": "....X.......X...", "ride": "x.x.x.x.x.x.x.x." }
+        }
+      }
+    },
+    "keys": { "label": "键盘", "default": { "pattern": "柱式和弦铺底" } }
+  }
+}

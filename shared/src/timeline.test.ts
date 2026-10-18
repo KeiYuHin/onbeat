@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import exampleJson from '../../songs/example-song.json';
+import exampleJson from './fixtures/example-song.json';
 import { compileSong, parseSong } from './song';
 import { barPosition, beatAt, loadSong, repeatSection, startPlayback, START_LEAD_MS, stopPlayback } from './timeline';
 
