@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { applyDrumEdits } from '@onbeat/shared';
 import { startServer } from './server';
 import { TEST_SONGS, TestClient } from './testClient';
 
@@ -103,5 +104,69 @@ describe('rooms', () => {
     const b = await connect();
     b.send({ type: 'join', room, part: 'bass' });
     expect((await b.next('error')).code).toBe('room-not-found');
+  });
+});
+
+describe('rehearsal edits', () => {
+  const inRoom = async () => {
+    const a = await connect();
+    a.send({ type: 'create', part: 'drums' });
+    const { room } = await a.next('welcome');
+    await a.next('state');
+    await a.next('edits');
+    const b = await connect();
+    b.send({ type: 'join', room, part: 'bass' });
+    await b.next('state');
+    await b.next('edits');
+    return [a, b];
+  };
+
+  it('repeats the current section for everyone, and refuses once it is over', async () => {
+    const [a, b] = await inRoom();
+    a.send({ type: 'cmd', action: 'repeatSection', sectionIndex: 0 }); // stopped at the top: still ahead
+    expect((await b.next('state')).state.extraPasses).toEqual({ 0: 1 });
+    a.send({ type: 'cmd', action: 'repeatSection', sectionIndex: 5 });
+    expect((await a.next('error')).code).toBe('too-late');
+  });
+
+  it('syncs drum edits to the room, validates them, and clears them on song change', async () => {
+    const [a, b] = await inRoom();
+    const pattern = { kick: 'x...'.repeat(4) };
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: 'a', pattern });
+    expect((await b.next('edits')).edits).toEqual({ songId: 'four', drums: { sections: { a: pattern } } });
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: null, pattern: { kick: 'x...' } });
+    expect((await a.next('error')).code).toBe('bad-pattern');
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: 'nope', pattern });
+    expect((await a.next('error')).code).toBe('bad-pattern');
+    a.send({ type: 'cmd', action: 'selectSong', songId: 'waltz' });
+    expect((await b.next('edits')).edits).toEqual({ songId: 'waltz', drums: {} });
+  });
+
+  it('saves edits through the hook and sends everyone the updated song', async () => {
+    await server.close();
+    const saved: unknown[] = [];
+    server = await startServer({
+      songs: TEST_SONGS,
+      port: 0,
+      saveSong: (songId, drums) => {
+        saved.push([songId, drums]);
+        return applyDrumEdits(TEST_SONGS.find((s) => s.id === songId)!, drums);
+      },
+    });
+    const [a, b] = await inRoom();
+    const pattern = { snare: '....x.......x...' };
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: null, pattern });
+    await b.next('edits');
+    a.send({ type: 'cmd', action: 'saveSong' });
+    const { songs } = await b.next('songs', (m) => !!m.songs[0].parts.drums);
+    expect(songs[0].parts.drums?.default.pattern).toEqual(pattern);
+    expect((await b.next('edits')).edits.drums).toEqual({});
+    expect(saved).toEqual([['four', { default: pattern, sections: {} }]]);
+  });
+
+  it('fails to save without a hook', async () => {
+    const [a] = await inRoom();
+    a.send({ type: 'cmd', action: 'saveSong' });
+    expect((await a.next('error')).code).toBe('save-failed');
   });
 });

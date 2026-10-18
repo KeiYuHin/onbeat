@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { barPosition, beatAt, loadSong, startPlayback, START_LEAD_MS, stopPlayback } from './timeline';
+import exampleJson from '../../songs/example-song.json';
+import { compileSong, parseSong } from './song';
+import { barPosition, beatAt, loadSong, repeatSection, startPlayback, START_LEAD_MS, stopPlayback } from './timeline';
 
 const idle = (bpm = 120) => loadSong({ id: 'test', bpm });
 
@@ -52,5 +54,33 @@ describe('barPosition', () => {
   it('handles count-in (negative) beats', () => {
     expect(barPosition(-4)).toEqual({ bar: 0, beatInBar: 1, phase: 0 });
     expect(barPosition(-0.25)).toEqual({ bar: 0, beatInBar: 4, phase: 0.75 });
+  });
+});
+
+describe('repeatSection', () => {
+  const song = parseSong(exampleJson);
+  const playing = { ...loadSong(song), playing: true, anchorServerTime: 0, anchorBeat: 0 }; // beat = ms / 500
+
+  it('adds a pass without moving the current position', () => {
+    const c = compileSong(song);
+    const t = 20 * 500; // verse, pass 1
+    const next = repeatSection(playing, c, 1, t)!;
+    expect(next.extraPasses).toEqual({ 1: 1 });
+    expect(beatAt(next, t)).toBe(beatAt(playing, t));
+    expect(compileSong(song, next.extraPasses).sections[1].times).toBe(3);
+    expect(repeatSection(next, compileSong(song, next.extraPasses), 1, t)!.extraPasses).toEqual({ 1: 2 });
+  });
+
+  it('refuses once the section is in its last beat or over', () => {
+    const c = compileSong(song);
+    const verseEnd = c.sections[2].startBeat;
+    expect(repeatSection(playing, c, 1, (verseEnd - 0.5) * 500)).toBeNull();
+    expect(repeatSection(playing, c, 0, verseEnd * 500)).toBeNull();
+    expect(repeatSection(playing, c, 99, 0)).toBeNull();
+  });
+
+  it('is cleared by a fresh start', () => {
+    const extended = { ...idle(), extraPasses: { 1: 1 } };
+    expect(startPlayback(extended, 0).extraPasses).toBeUndefined();
   });
 });

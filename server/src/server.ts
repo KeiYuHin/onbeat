@@ -6,15 +6,21 @@ import { performance } from 'node:perf_hooks';
 import sirv from 'sirv';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
+  checkDrumPattern,
+  compileSong,
   loadSong,
   parseClientMsg,
+  repeatSection,
   startPlayback,
   stopPlayback,
   type ClientMsg,
   type Command,
+  type DrumEdits,
+  type ErrorCode,
   type Member,
   type Part,
   type PlaybackState,
+  type RoomEdits,
   type ServerMsg,
   type Song,
 } from '@onbeat/shared';
@@ -30,11 +36,14 @@ export type ServerOptions = {
   latencyMs?: (connId: string) => number;
   /** How long an empty room survives, so a phone that reloads can rejoin. */
   emptyRoomTtlMs?: number;
+  /** Persists a room's drum edits into the song file and returns the updated song. Without it, saving fails. */
+  saveSong?: (songId: string, drums: DrumEdits) => Song | Promise<Song>;
 };
 
 type Room = {
   code: string;
   state: PlaybackState;
+  edits: RoomEdits;
   members: Map<string, Member>;
   conns: Set<Conn>;
   expiry: NodeJS.Timeout | null;
@@ -53,8 +62,9 @@ type Conn = {
 const HEARTBEAT_MS = 15_000;
 
 export async function startServer(opts: ServerOptions) {
-  const { songs, port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000 } = opts;
-  if (songs.length === 0) throw new Error('at least one song is required');
+  const { port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000, saveSong } = opts;
+  if (opts.songs.length === 0) throw new Error('at least one song is required');
+  let songs = opts.songs; // replaced when a song is saved
   const songById = new Map(songs.map((s) => [s.id, s]));
   const now = () => performance.now();
   const rooms = new Map<string, Room>();
@@ -102,6 +112,7 @@ export async function startServer(opts: ServerOptions) {
     send(conn, { type: 'welcome', room: room.code, memberId: conn.id });
     send(conn, { type: 'songs', songs });
     send(conn, { type: 'state', state: room.state });
+    send(conn, { type: 'edits', edits: room.edits });
     broadcast(room, { type: 'members', members: [...room.members.values()] });
   }
 
@@ -117,18 +128,58 @@ export async function startServer(opts: ServerOptions) {
     }
   }
 
-  function applyCommand(state: PlaybackState, cmd: Command): PlaybackState | null {
+  type PlaybackCommand = Extract<Command, { action: 'start' | 'stop' | 'selectSong' | 'repeatSection' }>;
+
+  function applyCommand(state: PlaybackState, cmd: PlaybackCommand): PlaybackState | ErrorCode {
     const t = now();
+    const song = songById.get(state.songId)!;
     switch (cmd.action) {
       case 'start':
-        return startPlayback(state, t, { beatsPerBar: songById.get(state.songId)!.timeSignature[0] });
+        return startPlayback(state, t, { beatsPerBar: song.timeSignature[0] });
       case 'stop':
         return stopPlayback(state, t);
       case 'selectSong': {
-        const song = songById.get(cmd.songId);
-        return song ? loadSong(song, t) : null;
+        const next = songById.get(cmd.songId);
+        return next ? loadSong(next, t) : 'song-not-found';
       }
+      case 'repeatSection':
+        return repeatSection(state, compileSong(song, state.extraPasses), cmd.sectionIndex, t) ?? 'too-late';
     }
+  }
+
+  function setDrums(room: Room, cmd: Extract<Command, { action: 'setDrums' }>): ErrorCode | null {
+    const song = songById.get(room.state.songId)!;
+    if (cmd.sectionId !== null && !(cmd.sectionId in song.sections)) return 'bad-pattern';
+    if (cmd.pattern && checkDrumPattern(cmd.pattern, song.timeSignature[0] * 4)) return 'bad-pattern';
+    const { default: def, sections = {} } = room.edits.drums;
+    const drums: DrumEdits = { ...(def && { default: def }), sections: { ...sections } };
+    if (cmd.sectionId === null) {
+      if (cmd.pattern) drums.default = cmd.pattern;
+      else delete drums.default;
+    } else if (cmd.pattern) drums.sections![cmd.sectionId] = cmd.pattern;
+    else delete drums.sections![cmd.sectionId];
+    room.edits = { songId: song.id, drums };
+    broadcast(room, { type: 'edits', edits: room.edits });
+    return null;
+  }
+
+  async function save(room: Room): Promise<ErrorCode | null> {
+    const { songId, drums } = room.edits;
+    if (!saveSong) return 'save-failed';
+    try {
+      const updated = await saveSong(songId, drums);
+      songById.set(songId, updated);
+      songs = songs.map((s) => (s.id === songId ? updated : s));
+    } catch (e) {
+      console.error(`saving song "${songId}" failed:`, e);
+      return 'save-failed';
+    }
+    for (const c of conns) if (c.room) send(c, { type: 'songs', songs });
+    if (room.edits.songId === songId) {
+      room.edits = { songId, drums: {} };
+      broadcast(room, { type: 'edits', edits: room.edits });
+    }
+    return null;
   }
 
   function handle(conn: Conn, msg: ClientMsg) {
@@ -137,7 +188,14 @@ export async function startServer(opts: ServerOptions) {
         return send(conn, { type: 'pong', c0: msg.c0, serverTime: now() });
       case 'create': {
         const code = newRoomCode();
-        const room: Room = { code, state: loadSong(songs[0], now()), members: new Map(), conns: new Set(), expiry: null };
+        const room: Room = {
+          code,
+          state: loadSong(songs[0], now()),
+          edits: { songId: songs[0].id, drums: {} },
+          members: new Map(),
+          conns: new Set(),
+          expiry: null,
+        };
         rooms.set(code, room);
         return enter(conn, room, msg.part);
       }
@@ -149,10 +207,18 @@ export async function startServer(opts: ServerOptions) {
       case 'cmd': {
         const room = conn.room;
         if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
+        const fail = (code: ErrorCode | null) => code && send(conn, { type: 'error', code });
+        if (msg.action === 'setDrums') return fail(setDrums(room, msg));
+        if (msg.action === 'saveSong') return void save(room).then(fail);
         const next = applyCommand(room.state, msg);
-        if (!next) return send(conn, { type: 'error', code: 'song-not-found' });
+        if (typeof next === 'string') return fail(next);
         room.state = next;
-        return broadcast(room, { type: 'state', state: room.state });
+        broadcast(room, { type: 'state', state: room.state });
+        if (msg.action === 'selectSong') {
+          room.edits = { songId: next.songId, drums: {} };
+          broadcast(room, { type: 'edits', edits: room.edits });
+        }
+        return;
       }
     }
   }

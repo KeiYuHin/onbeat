@@ -12,6 +12,9 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   'bad-message': '消息格式错误',
   'not-in-room': '还没有进入房间',
   'song-not-found': '找不到这首歌',
+  'too-late': '这一段马上结束了，来不及再绕一遍',
+  'bad-pattern': '鼓谱格式不对',
+  'save-failed': '保存失败（看一下服务器窗口的报错）',
 };
 
 const WAKE_LOCK_HINT: Partial<Record<WakeLockStatus, string>> = {

@@ -1,4 +1,5 @@
 import type { PlaybackState } from './protocol';
+import type { CompiledSong } from './song';
 
 /** Lead time before the count-in starts, so the start command reaches every device first. */
 export const START_LEAD_MS = 1500;
@@ -30,8 +31,9 @@ export function startPlayback(
   serverNow: number,
   { startBeat = 0, beatsPerBar = DEFAULT_BEATS_PER_BAR, leadMs = START_LEAD_MS } = {},
 ): PlaybackState {
+  const { extraPasses: _, ...rest } = state; // a fresh run plays the song as written
   return {
-    ...state,
+    ...rest,
     playing: true,
     anchorServerTime: serverNow + leadMs,
     anchorBeat: startBeat - beatsPerBar,
@@ -41,6 +43,31 @@ export function startPlayback(
 /** Freezes the position where it is, re-anchored at `serverNow`. */
 export function stopPlayback(state: PlaybackState, serverNow: number): PlaybackState {
   return { ...state, playing: false, anchorServerTime: serverNow, anchorBeat: beatAt(state, serverNow) };
+}
+
+/**
+ * Don't extend a section in its last beat: by the time the new state reaches every phone, some may
+ * already show the next section and would jump back.
+ */
+export const REPEAT_MARGIN_BEATS = 1;
+
+/**
+ * "再绕一遍": play the section at `sectionIndex` once more. Only bars after the current position move,
+ * so beatAt stays continuous. Returns null when that section is already over (or about to be).
+ */
+export function repeatSection(
+  state: PlaybackState,
+  compiled: CompiledSong,
+  sectionIndex: number,
+  serverNow: number,
+): PlaybackState | null {
+  const section = compiled.sections[sectionIndex];
+  if (!section) return null;
+  const end = section.startBeat + section.barCount * compiled.beatsPerBar;
+  if (beatAt(state, serverNow) >= end - REPEAT_MARGIN_BEATS) return null;
+  const extra = { ...state.extraPasses };
+  extra[sectionIndex] = (extra[sectionIndex] ?? 0) + 1;
+  return { ...state, extraPasses: extra };
 }
 
 export type BarPosition = {

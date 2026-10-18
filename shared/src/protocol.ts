@@ -1,5 +1,5 @@
 // Wire protocol shared by server and web: JSON messages over a single WebSocket.
-import type { Song } from './song';
+import type { DrumEdits, DrumPattern, ExtraPasses, Song } from './song';
 
 export const PARTS = ['guitar1', 'guitar2', 'bass', 'drums', 'keys'] as const;
 export type Part = (typeof PARTS)[number];
@@ -22,11 +22,25 @@ export type PlaybackState = {
   anchorServerTime: number; // server clock (ms)
   anchorBeat: number; // beat count at the anchor, from song start, 0-based
   loop?: { startBeat: number; endBeat: number };
+  /** Sections played more times than written ("再绕一遍"); part of the timeline, so it lives here. */
+  extraPasses?: ExtraPasses;
 };
+
+/** Room-level song changes that are not saved to the song file yet. */
+export type RoomEdits = { songId: string; drums: DrumEdits };
 
 export type Member = { id: string; part: Part };
 
-export type Command = { action: 'start' } | { action: 'stop' } | { action: 'selectSong'; songId: string };
+export type Command =
+  | { action: 'start' }
+  | { action: 'stop' }
+  | { action: 'selectSong'; songId: string }
+  /** One more pass of the section at this form index; refused once it is (almost) over. */
+  | { action: 'repeatSection'; sectionIndex: number }
+  /** Replace the drum pattern for a section (null: the song default); pattern null drops the edit. */
+  | { action: 'setDrums'; sectionId: string | null; pattern: DrumPattern | null }
+  /** Write the room's edits into the song file. */
+  | { action: 'saveSong' };
 
 export type ClientMsg =
   | { type: 'create'; part: Part }
@@ -34,7 +48,14 @@ export type ClientMsg =
   | { type: 'ping'; c0: number }
   | ({ type: 'cmd' } & Command);
 
-export type ErrorCode = 'bad-message' | 'room-not-found' | 'not-in-room' | 'song-not-found';
+export type ErrorCode =
+  | 'bad-message'
+  | 'room-not-found'
+  | 'not-in-room'
+  | 'song-not-found'
+  | 'too-late'
+  | 'bad-pattern'
+  | 'save-failed';
 
 export type ServerMsg =
   | { type: 'welcome'; room: string; memberId: string }
@@ -42,9 +63,18 @@ export type ServerMsg =
   | { type: 'pong'; c0: number; serverTime: number }
   | { type: 'state'; state: PlaybackState }
   | { type: 'members'; members: Member[] }
-  | { type: 'songs'; songs: Song[] };
+  | { type: 'songs'; songs: Song[] }
+  | { type: 'edits'; edits: RoomEdits };
 
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
+
+/** Shape only; the server checks step counts and drum names against the song. */
+const isPatternShape = (p: unknown): p is DrumPattern | null =>
+  p === null ||
+  (typeof p === 'object' &&
+    !Array.isArray(p) &&
+    Object.keys(p).length <= 16 &&
+    Object.values(p).every((row) => typeof row === 'string' && row.length <= 64));
 
 /** Validates untrusted client input; returns null for anything malformed. */
 export function parseClientMsg(raw: string): ClientMsg | null {
@@ -68,6 +98,11 @@ export function parseClientMsg(raw: string): ClientMsg | null {
       if (m.action === 'start' || m.action === 'stop') return { type: 'cmd', action: m.action };
       if (m.action === 'selectSong' && typeof m.songId === 'string')
         return { type: 'cmd', action: 'selectSong', songId: m.songId };
+      if (m.action === 'repeatSection' && Number.isInteger(m.sectionIndex) && m.sectionIndex >= 0)
+        return { type: 'cmd', action: 'repeatSection', sectionIndex: m.sectionIndex };
+      if (m.action === 'setDrums' && (m.sectionId === null || typeof m.sectionId === 'string') && isPatternShape(m.pattern))
+        return { type: 'cmd', action: 'setDrums', sectionId: m.sectionId, pattern: m.pattern };
+      if (m.action === 'saveSong') return { type: 'cmd', action: 'saveSong' };
       return null;
     default:
       return null;
