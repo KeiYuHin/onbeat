@@ -5,14 +5,18 @@ import {
   bpmAt,
   msPerBeat,
   pendingJump,
+  cuesFor,
   DRUMS,
   partDetail,
+  slotAt,
   songPosition,
   strumIndex,
+  type ChordSlot,
   type ClockSync,
   type CompiledSong,
   type Drum,
   type DrumPattern,
+  type Key,
   type Meter,
   type Part,
   type PartDetail,
@@ -20,6 +24,7 @@ import {
   type SectionSpan,
   type SongPosition,
 } from '@onbeat/shared';
+import { chordLabel, keyText, type ChordLabel, type DisplaySettings } from './display';
 
 const STRUM_GLYPHS: Record<string, string> = { D: '↓', U: '↑', '-': '·' };
 
@@ -35,10 +40,12 @@ type Props = {
   onSeek: (sectionIndex: number) => void;
   onLoop: (sectionIndex: number | null) => void;
   onEditDrums: () => void;
+  /** This device's chord names and capo. */
+  display: DisplaySettings;
 };
 
 /** Re-renders every animation frame; everything shown is derived from the shared clock, never counted locally. */
-export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onSeek, onLoop, onEditDrums }: Props) {
+export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onSeek, onLoop, onEditDrums, display }: Props) {
   const [, setFrame] = useState(0);
   useEffect(() => {
     let id = requestAnimationFrame(function tick() {
@@ -51,6 +58,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   if (!clock.synced) return <div className="score loading">同步时钟中…</div>;
 
   const { song, beatsPerBar, sections } = compiled;
+  const name: ChordNamer = (slot, key) => chordLabel(slot, key, display, !!song.key);
   const now = clock.serverNow();
   const beat = beatAt(playback, now);
   const bpm = bpmAt(playback, now);
@@ -89,7 +97,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   const barLeft = bar ? bar.startBeat + bar.beats - beat : 0;
   const jumpTo =
     live && target && pending && (pending.atServerTime - now) / msPerBeat(bpm) <= barLeft + 1e-3
-      ? { chord: target.chord, label: target.section.label }
+      ? { chord: name(target.chord, target.key), label: target.section.label }
       : null;
 
   return (
@@ -100,7 +108,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
           {bpm}
           {pending && pending.bpm !== bpm && <strong className="pending"> → {pending.bpm}</strong>} BPM
           {(pending?.bpm ?? bpm) !== song.bpm && <small>（原速 {song.bpm}）</small>}
-          {song.key ? ` · ${song.key}` : ''}
+          {song.key && shown ? ` · ${keyText(shown.key, display)}` : ''}
         </span>
         <span className={`where${countIn && !waiting ? ' count-in' : ''}`}>{where}</span>
         {jumpNotice && <span className="pending">{jumpNotice}</span>}
@@ -117,6 +125,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
             parked={parked}
             looping={!!loop && loop.startBeat === shown.section.startBeat}
             jumpTo={jumpTo}
+            name={name}
             onRepeat={playback.playing ? onRepeat : null}
             onUnloop={() => onLoop(null)}
           />
@@ -127,6 +136,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
 
       <div className="part-panel">
         <div className="part-label">{spec?.label ?? part}</div>
+        <Cues compiled={compiled} barIndex={shown?.barIndex ?? null} part={part} />
         {detail ? (
           <PartDetails
             detail={detail}
@@ -179,6 +189,7 @@ function LoopView({
   parked,
   looping,
   jumpTo,
+  name,
   onRepeat,
   onUnloop,
 }: {
@@ -192,6 +203,7 @@ function LoopView({
   looping: boolean;
   /** A seek landing at the end of the current bar. */
   jumpTo: NextUp | null;
+  name: ChordNamer;
   onRepeat: ((sectionIndex: number) => void) | null;
   onUnloop: () => void;
 }) {
@@ -211,9 +223,12 @@ function LoopView({
   const cols = Math.min(bars.length, 4);
   // The card whose bottom half shows the first chord of what comes next: the current card before a seek,
   // or the last card for the whole last pass, so the change is in view well before it happens.
-  let split: { index: number } & NextUp = { index: -1, chord: '', label: '' };
+  let split: { index: number } & NextUp = { index: -1, chord: { main: '' }, label: '' };
   if (jumpTo && card >= 0) split = { index: card, ...jumpTo };
-  else if (lastPass && next) split = { index: bars.length - 1, chord: compiled.bars[next.startBar].chords[0], label: next.label };
+  else if (lastPass && next) {
+    const first = compiled.bars[next.startBar];
+    split = { index: bars.length - 1, chord: name(first.chords[0], first.key), label: next.label };
+  }
 
   return (
     <div className="loop">
@@ -243,8 +258,9 @@ function LoopView({
       <div className="cards" style={{ '--cols': cols, '--rows': Math.ceil(bars.length / cols) } as CSSProperties}>
         {bars.map((bar, i) => {
           const current = i === card;
-          const slot = current ? Math.floor((inBar * bar.chords.length) / bar.beats) : -1;
-          const chars = bar.chords.join(' ').length;
+          const slot = current ? slotAt(bar, inBar) : -1;
+          const labels = bar.chords.map((c) => name(c, bar.key));
+          const chars = labels.map((l) => l.main).join(' ').length;
           const splitHere = i === split.index;
           return (
             <div
@@ -253,10 +269,8 @@ function LoopView({
             >
               <div className="card-top">
                 <div className="card-chords" style={{ '--scale': Math.min(1, 2.6 / chars) } as CSSProperties}>
-                  {bar.chords.map((c, j) => (
-                    <span key={j} className={j === slot && bar.chords.length > 1 ? 'now' : ''}>
-                      {c}
-                    </span>
+                  {labels.map((label, j) => (
+                    <ChordName key={j} label={label} className={j === slot && labels.length > 1 ? 'now' : ''} />
                   ))}
                 </div>
                 <div className="card-dots">
@@ -270,9 +284,9 @@ function LoopView({
                   <span className="card-next-label">→ {split.label}</span>
                   <span
                     className="card-next-chord"
-                    style={{ '--scale': Math.min(1, 2.6 / split.chord.length) } as CSSProperties}
+                    style={{ '--scale': Math.min(1, 2.6 / split.chord.main.length) } as CSSProperties}
                   >
-                    {split.chord}
+                    <ChordName label={split.chord} />
                   </span>
                 </div>
               )}
@@ -284,7 +298,7 @@ function LoopView({
       <div className="preview">
         {live && next && lastPass && remainingBars <= Math.min(section.loopBars, 4) ? (
           <>
-            下一段：<strong>{next.label}</strong> · {previewChords(compiled, next)}
+            下一段：<strong>{next.label}</strong> · {previewChords(compiled, next, name)}
           </>
         ) : (
           ' '
@@ -294,14 +308,48 @@ function LoopView({
   );
 }
 
+/** Cues for this part in the bar being played, and in the next one so they can be seen coming. */
+function Cues({ compiled, barIndex, part }: { compiled: CompiledSong; barIndex: number | null; part: Part }) {
+  if (barIndex === null) return null;
+  const now = cuesFor(compiled.bars[barIndex], part);
+  const next = barIndex + 1 < compiled.bars.length ? cuesFor(compiled.bars[barIndex + 1], part) : [];
+  if (!now.length && !next.length) return null;
+  return (
+    <div className="cues">
+      {now.map((c, i) => (
+        <span key={i} className="cue now">
+          {c.text}
+        </span>
+      ))}
+      {next.map((c, i) => (
+        <span key={i} className="cue next">
+          下一小节：{c.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** First chord of what comes next, and the section it belongs to. */
-type NextUp = { chord: string; label: string };
+type NextUp = { chord: ChordLabel; label: string };
+
+type ChordNamer = (slot: ChordSlot, key: Key) => ChordLabel;
+
+/** A chord name, with the scale degree in small type beside it when showing both. */
+function ChordName({ label, className }: { label: ChordLabel; className?: string }) {
+  return (
+    <span className={className}>
+      {label.main}
+      {label.alt && <small className="chord-alt">{label.alt}</small>}
+    </span>
+  );
+}
 
 /** "F G C Am": the chords of one pass of a section, repeats of the same chord merged. */
-function previewChords(compiled: CompiledSong, section: SectionSpan): string {
+function previewChords(compiled: CompiledSong, section: SectionSpan, name: ChordNamer): string {
   const chords = compiled.bars
     .slice(section.startBar, section.startBar + section.loopBars)
-    .flatMap((b) => b.chords)
+    .flatMap((b) => b.chords.map((c) => name(c, b.key).main))
     .filter((c, i, all) => i === 0 || c !== all[i - 1]);
   return chords.length > 8 ? `${chords.slice(0, 8).join(' ')} …` : chords.join(' ');
 }

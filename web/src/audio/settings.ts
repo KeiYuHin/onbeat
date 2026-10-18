@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
 import { DEFAULT_SOUND_OPTIONS, type SoundOptions } from '@onbeat/shared';
+import { useStoredSettings } from '../storedSettings';
 
 /** Per-device sound settings; never synced, since usually only one device drives the speaker. */
 export type SoundSettings = SoundOptions & {
@@ -18,29 +18,4 @@ export type BassTone = 'bass' | 'sine';
 export const LATENCY_RANGE_MS = 300;
 
 const DEFAULTS: SoundSettings = { ...DEFAULT_SOUND_OPTIONS, enabled: false, volume: 0.8, latencyMs: 0, flash: false, bassTone: 'bass' };
-const KEY = 'onbeat.sound';
-
-function load(): SoundSettings {
-  try {
-    const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
-    return { ...DEFAULTS, ...(typeof saved === 'object' && saved ? saved : {}) };
-  } catch {
-    return DEFAULTS;
-  }
-}
-
-export function useSoundSettings(): [SoundSettings, (patch: Partial<SoundSettings>) => void] {
-  const [settings, setSettings] = useState(load);
-  const update = useCallback((patch: Partial<SoundSettings>) => {
-    setSettings((s) => {
-      const next = { ...s, ...patch };
-      try {
-        localStorage.setItem(KEY, JSON.stringify(next));
-      } catch {
-        // Private mode: settings just won't persist.
-      }
-      return next;
-    });
-  }, []);
-  return [settings, update];
-}
+export const useSoundSettings = () => useStoredSettings('onbeat.sound', DEFAULTS);

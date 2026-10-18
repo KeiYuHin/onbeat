@@ -11,6 +11,7 @@ import {
   type CompiledSong,
   type PlaybackState,
 } from '@onbeat/shared';
+import { chordLabel, type DisplaySettings } from './display';
 
 type Props = {
   clock: ClockSync;
@@ -19,13 +20,14 @@ type Props = {
   onCommand: (cmd: Command) => void;
   /** Jumps and loops close the sheet so the score is visible again; tempo taps keep it open. */
   onDone: () => void;
+  display: DisplaySettings;
 };
 
 const TEMPO_STEPS = [-5, -1, 1, 5];
 const TEMPO_PERCENTS = [70, 80, 90, 100];
 
 /** M3 controls shared by the whole room: tempo, jump to a section or bar, loop a section. */
-export function RehearsalPanel({ clock, playback, compiled, onCommand, onDone }: Props) {
+export function RehearsalPanel({ clock, playback, compiled, onCommand, onDone, display }: Props) {
   const now = clock.serverNow();
   const songBpm = compiled.song.bpm;
   // While playing, a tempo change waits for the barline; show (and step from) where it's going.
@@ -102,7 +104,9 @@ export function RehearsalPanel({ clock, playback, compiled, onCommand, onDone }:
                   {compiled.bars.slice(s.startBar, s.startBar + s.barCount).map((bar, b) => (
                     <button key={b} onClick={() => act({ action: 'seek', sectionIndex: i, bar: b })}>
                       <span className="bar-number">{b + 1}</span>
-                      <span className="bar-chords">{bar.chords.join(' ')}</span>
+                      <span className="bar-chords">
+                        {bar.chords.map((c) => chordLabel(c, bar.key, display, !!compiled.song.key).main).join(' ')}
+                      </span>
                     </button>
                   ))}
                 </div>

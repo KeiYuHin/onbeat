@@ -179,8 +179,11 @@ button.link {
   border: 0;
   max-width: 50vw;
 }
-.topbar .sound-button {
+.topbar .display-button {
   margin-left: auto;
+}
+.topbar .display-button,
+.topbar .sound-button {
   font-size: 1rem;
   padding: 0.4rem 0.9rem;
 }
@@ -286,6 +289,49 @@ button.link {
 }
 .sound-panel p {
   margin: 0;
+}
+.sound-panel h3 {
+  margin: 8px 0 0;
+}
+.capo {
+  align-items: center;
+}
+.capo button {
+  min-width: 3rem;
+  font-size: 1.4rem;
+}
+.capo-value {
+  min-width: 5rem;
+  text-align: center;
+  font-size: 1.3rem;
+  font-weight: bold;
+}
+.cues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cue {
+  padding: 2px 10px;
+  border-radius: 8px;
+  font-size: 1.3rem;
+  font-weight: bold;
+}
+.cue.now {
+  background: var(--accent);
+  color: #000;
+}
+.cue.next {
+  border: 2px dashed var(--accent);
+  color: var(--accent);
+}
+/* The scale degree beside a letter chord when showing both */
+.chord-alt {
+  margin-left: 0.15em;
+  font-size: 0.45em;
+  font-weight: normal;
+  color: var(--muted);
+  vertical-align: super;
 }
 .members {
   list-style: none;

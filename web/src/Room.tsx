@@ -5,6 +5,7 @@ import {
   compileSong,
   PART_LABELS,
   PARTS,
+  parseKey,
   resumeBeat,
   songPosition,
   type ErrorCode,
@@ -13,6 +14,8 @@ import {
 import { AudioEngine } from './audio/engine';
 import { useSoundSettings } from './audio/settings';
 import { FATAL_ERRORS, RoomConnection, type RoomTarget } from './connection';
+import { useDisplaySettings } from './display';
+import { DisplayPanel } from './DisplayPanel';
 import { DrumEditor } from './DrumEditor';
 import { Invite } from './Invite';
 import { RehearsalPanel } from './RehearsalPanel';
@@ -74,7 +77,10 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
   const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
   const [sound, setSound] = useSoundSettings();
-  const [sheet, setSheet] = useState<null | 'sound' | 'rehearsal' | 'invite' | { drums: string | null }>(null);
+  const [display, setDisplay] = useDisplaySettings();
+  const [sheet, setSheet] = useState<null | 'sound' | 'display' | 'rehearsal' | 'invite' | { drums: string | null }>(
+    null,
+  );
 
   useEffect(() => {
     if (snap.room && snap.memberId) onRoom(snap.room);
@@ -164,6 +170,9 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
             </li>
           ))}
         </ul>
+        <button className="display-button" onClick={() => setSheet('display')}>
+          谱面
+        </button>
         <button className={`sound-button${audioStatus === 'on' ? ' on' : ''}`} onClick={() => setSheet('sound')}>
           {audioStatus === 'off' ? '🔇' : '🔊'} 声音
         </button>
@@ -190,6 +199,7 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
           onSeek={(sectionIndex) => conn.command({ action: 'seek', sectionIndex, bar: 0 })}
           onLoop={(sectionIndex) => conn.command({ action: 'setLoop', sectionIndex })}
           onEditDrums={openDrumEditor}
+          display={display}
         />
       ) : (
         <div className="score loading">加载中…</div>
@@ -223,6 +233,15 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
           />
         </Sheet>
       )}
+      {sheet === 'display' && (
+        <Sheet title="谱面（只影响本机）" onClose={() => setSheet(null)}>
+          <DisplayPanel
+            settings={display}
+            onChange={setDisplay}
+            songKey={(compiled?.song.key && parseKey(compiled.song.key)) || null}
+          />
+        </Sheet>
+      )}
       {sheet === 'invite' && snap.room && (
         <Sheet title="邀请队友" onClose={() => setSheet(null)}>
           <Invite room={snap.room} libraryKey={libraryKey} />
@@ -237,6 +256,7 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
             compiled={compiled}
             onCommand={(cmd) => conn.command(cmd)}
             onDone={() => setSheet(null)}
+            display={display}
           />
         </Sheet>
       )}

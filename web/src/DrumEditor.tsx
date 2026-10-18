@@ -63,7 +63,7 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
   const [device, setDevice] = useDeviceName(part);
   const steps = stepsPerBar(meter);
   const chunkSteps = useWide() ? steps : NARROW_BEATS * spb;
-  const sectionIds = [...new Set(song.form)];
+  const sectionIds = [...new Set(song.form.map((e) => e.section))];
   const [target, setTarget] = useState<string | null>(initialSectionId);
 
   const own = (id: string | null): DrumPattern | null => {
