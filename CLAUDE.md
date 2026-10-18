@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OnBeat is a PWA for band rehearsal. Each member opens a shared 6-digit room on their own phone and picks a part (guitar1 / guitar2 / bass / drums / keys). Any member can start or stop, and every device shows the same bar and beat, all driven by one shared clock. `SPEC.md` (written in Chinese) is the source of truth for scope, the sync model, the song format and the milestones. Read it before starting a milestone.
 
-Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 is done and is waiting for phone testing.
+Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 has passed multi-device testing. M2.5 is done and is waiting for phone testing.
 
 ## Commands
 
@@ -38,7 +38,7 @@ Node 24+, npm workspaces (`shared`, `server`, `web`). Run everything from the re
 
 Anything that moves in time is a function of `beatAt(state, clock.serverNow())`, never a clock of its own:
 
-- **Audio (M2.5):** sounds are events at beat positions. Use Web Audio lookahead scheduling: every 25ms, schedule the next 100ms of events on `AudioContext.currentTime`, never `setTimeout`. Map sync time to audio time with `audioContext.getOutputTimestamp()` minus `outputLatency`, plus a per-device ±300ms latency slider (for Bluetooth). Each device has its own sound on/off switch. Drum patterns live in the song JSON's `drums` part as 16-step strings, with CC0 samples in `web/public/kits/`.
+- **Audio (M2.5):** sounds are events at beat positions. `shared/src/sound.ts` (`soundEvents`) derives metronome, count-in, drum-pattern and fill events for a beat window as a pure function. `web/src/audio/engine.ts` (`AudioEngine`) wakes every 25ms and schedules the next 100ms on the AudioContext clock, never firing sounds from timers. It maps performance time to audio time at the speaker with `getOutputTimestamp()`, which already includes output latency (the fallback subtracts `outputLatency`). The lookahead window starts at the output latency, so events reach the audio thread about 100ms early. It applies a per-device ±300ms compensation slider for Bluetooth, and drops and reschedules its queue on any playback, song or sound-setting change. Sound settings are per device (localStorage `onbeat.sound`). Drum patterns are `x`/`X`/`.` step strings, `beatsPerBar*4` long, in the `drums` part. The kit WAVs in `web/public/kits/default/` come from `tools/gen-kit.mjs`.
 - **alphaTab (M4):** an optional Guitar Pro / MusicXML layer on top of the JSON skeleton, rendering only the user's track. Never use alphaTab's player timing. Set its cursor every frame from our position, and map beat → bar using the playback order with repeats unrolled.
 - The JSON skeleton (sections, bars, chords, strums) is the only layer sync depends on.
 
