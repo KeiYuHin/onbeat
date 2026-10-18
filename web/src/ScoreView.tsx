@@ -3,6 +3,7 @@ import {
   barPosition,
   beatAt,
   bpmAt,
+  msPerBeat,
   pendingJump,
   DRUMS,
   partDetail,
@@ -81,6 +82,12 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   else where = location!;
   // A seek waiting for the barline; during the count-in the target is already in `where`.
   const jumpNotice = !countIn && targetBar && `下一小节 → ${targetBar}`;
+  // The seek lands at the end of this bar: the current card previews where it goes.
+  const barLeft = beatsPerBar - (beat - Math.floor(beat / beatsPerBar) * beatsPerBar);
+  const jumpTo =
+    live && target && pending && (pending.atServerTime - now) / msPerBeat(bpm) <= barLeft + 1e-3
+      ? { chord: target.chord, label: target.section.label }
+      : null;
 
   return (
     <div className="score">
@@ -106,6 +113,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
             live={live}
             parked={parked}
             looping={!!loop && loop.startBeat === shown.section.startBeat}
+            jumpTo={jumpTo}
             onRepeat={playback.playing ? onRepeat : null}
             onUnloop={() => onLoop(null)}
           />
@@ -162,6 +170,7 @@ function LoopView({
   live,
   parked,
   looping,
+  jumpTo,
   onRepeat,
   onUnloop,
 }: {
@@ -173,6 +182,8 @@ function LoopView({
   parked: boolean;
   /** The room is looping this section, so there is no last pass and no next section. */
   looping: boolean;
+  /** A seek landing at the end of the current bar. */
+  jumpTo: NextUp | null;
   onRepeat: ((sectionIndex: number) => void) | null;
   onUnloop: () => void;
 }) {
@@ -191,6 +202,11 @@ function LoopView({
   const next = compiled.sections[sectionIndex + 1];
   const bars = compiled.bars.slice(section.startBar, section.startBar + section.loopBars);
   const cols = Math.min(bars.length, 4);
+  // The card whose bottom half shows the first chord of what comes next: the current card before a seek,
+  // or the last card for the whole last pass, so the change is in view well before it happens.
+  let split: { index: number } & NextUp = { index: -1, chord: '', label: '' };
+  if (jumpTo && card >= 0) split = { index: card, ...jumpTo };
+  else if (lastPass && next) split = { index: bars.length - 1, chord: compiled.bars[next.startBar].chords[0], label: next.label };
 
   return (
     <div className="loop">
@@ -222,20 +238,37 @@ function LoopView({
           const current = i === card;
           const slot = current ? Math.floor((inBar * bar.chords.length) / bpb) : -1;
           const chars = bar.chords.join(' ').length;
+          const splitHere = i === split.index;
           return (
-            <div key={i} className={`card${current ? ' current' : ''}${live || current ? '' : ' dim'}`}>
-              <div className="card-chords" style={{ '--scale': Math.min(1, 2.6 / chars) } as CSSProperties}>
-                {bar.chords.map((c, j) => (
-                  <span key={j} className={j === slot && bar.chords.length > 1 ? 'now' : ''}>
-                    {c}
+            <div
+              key={i}
+              className={`card${current ? ' current' : ''}${live || current ? '' : ' dim'}${splitHere ? ' split' : ''}`}
+            >
+              <div className="card-top">
+                <div className="card-chords" style={{ '--scale': Math.min(1, 2.6 / chars) } as CSSProperties}>
+                  {bar.chords.map((c, j) => (
+                    <span key={j} className={j === slot && bar.chords.length > 1 ? 'now' : ''}>
+                      {c}
+                    </span>
+                  ))}
+                </div>
+                <div className="card-dots">
+                  {Array.from({ length: bpb }, (_, j) => (
+                    <span key={j} className={live && current && j === Math.floor(inBar) ? 'on' : ''} />
+                  ))}
+                </div>
+              </div>
+              {splitHere && (
+                <div className="card-next">
+                  <span className="card-next-label">→ {split.label}</span>
+                  <span
+                    className="card-next-chord"
+                    style={{ '--scale': Math.min(1, 2.6 / split.chord.length) } as CSSProperties}
+                  >
+                    {split.chord}
                   </span>
-                ))}
-              </div>
-              <div className="card-dots">
-                {Array.from({ length: bpb }, (_, j) => (
-                  <span key={j} className={live && current && j === Math.floor(inBar) ? 'on' : ''} />
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -253,6 +286,9 @@ function LoopView({
     </div>
   );
 }
+
+/** First chord of what comes next, and the section it belongs to. */
+type NextUp = { chord: string; label: string };
 
 /** "F G C Am": the chords of one pass of a section, repeats of the same chord merged. */
 function previewChords(compiled: CompiledSong, section: SectionSpan): string {
