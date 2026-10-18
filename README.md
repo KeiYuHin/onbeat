@@ -26,7 +26,7 @@ OnBeat server listening on port 8787
 1. Connect the phones to the **same Wi-Fi** as the laptop.
 2. Open the "phones on the same Wi-Fi" address in the phone's browser.
 3. On one device, pick a part and tap **创建新房间** (create a new room). The room code appears at the top, and the address bar now contains `?room=xxxxxx`, so you can share that link directly.
-4. On the other devices, pick a part, enter the code, and tap **加入** (join).
+4. On the other devices, pick a part, enter the code, and tap **加入** (join). To change part later, tap your part next to the room code; there's no need to leave.
 5. Anyone can tap **开始** (start). After about 1.5s comes a one-bar count-in (预备), then the song plays from the top on every device. Beat dots at the top right flash orange on the downbeat and blue on the other beats.
 
 ### Loop view and 再绕一遍
@@ -37,7 +37,7 @@ The middle panel shows one pass of the current section as bar cards (for example
 
 ### Drum machine editor (whole room)
 
-Open it from **编辑鼓谱** (drummer's part panel, or the sound settings). Pick 全曲默认 or a section, start from a preset (基本 8beat, 抒情 4beat, 16beat, 摇滚, Disco, 放克, 雷鬼, 华尔兹…), and tap cells to cycle empty → hit → accent. Every change syncs to the whole room immediately, so the device on the speaker plays it right away. Changes last as long as the room stays on that song; **保存到歌曲文件** writes them into `songs/<song>.json` on the laptop.
+Open it from **编辑鼓谱** (drummer's part panel, or the sound settings). Pick 全曲默认 or a section, start from a preset (基本 8beat, 抒情 4beat, 16beat, 摇滚, Disco, 放克, 雷鬼, 华尔兹…), and tap cells to cycle empty → hit → accent. **全曲默认** is the pattern every section uses unless that section has its own (marked 单独 / 跟默认). **所有段落都用这个节奏** makes every section follow the default in one go, and **改回跟全曲默认** does it for one section. Every change syncs to the whole room immediately, so the device on the speaker plays it right away. Changes last as long as the room stays on that song; **保存到歌曲文件** writes them into `songs/<song>.json` on the laptop.
 
 ### Sound (per device)
 
