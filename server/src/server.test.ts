@@ -138,6 +138,31 @@ describe('rehearsal edits', () => {
     expect((await a.next('error')).code).toBe('too-late');
   });
 
+  it('seeks, loops and changes tempo for everyone, and starts from where a seek left it', async () => {
+    await server.close();
+    server = await startServer({ songs: [TEST_SONGS[1]], port: 0 }); // waltz: two 2-bar sections in 3/4
+    const [a, b] = await inRoom();
+    a.send({ type: 'cmd', action: 'seek', sectionIndex: 1, bar: 1 });
+    expect((await b.next('state')).state).toMatchObject({ playing: false, anchorBeat: 9 });
+    a.send({ type: 'cmd', action: 'setBpm', bpm: 60 });
+    expect((await b.next('state')).state.bpm).toBe(60);
+    a.send({ type: 'cmd', action: 'start' });
+    const started = (await b.next('state')).state;
+    expect(started).toMatchObject({ anchorBeat: -3, jump: { beat: 9, bpm: 60 } });
+
+    a.send({ type: 'cmd', action: 'setLoop', sectionIndex: 1 });
+    expect((await b.next('state')).state.loop).toEqual({ startBeat: 6, endBeat: 12 });
+    a.send({ type: 'cmd', action: 'repeatSection', sectionIndex: 1 });
+    expect((await a.next('error')).code).toBe('looping');
+    a.send({ type: 'cmd', action: 'setLoop', sectionIndex: null });
+    expect((await b.next('state')).state.loop).toBeUndefined();
+
+    a.send({ type: 'cmd', action: 'seek', sectionIndex: 1, bar: 2 });
+    expect((await a.next('error')).code).toBe('bad-position');
+    a.send({ type: 'cmd', action: 'setBpm', bpm: 1000 } as never);
+    expect((await a.next('error')).code).toBe('bad-message');
+  });
+
   it('syncs drum edits to the room, validates them, and clears them on song change', async () => {
     const [a, b] = await inRoom();
     const pattern = { kick: 'x...'.repeat(4) };

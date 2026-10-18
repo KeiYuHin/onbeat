@@ -11,6 +11,10 @@ import {
   loadSong,
   parseClientMsg,
   repeatSection,
+  resumeBeat,
+  seekTo,
+  setBpm,
+  setLoop,
   startPlayback,
   stopPlayback,
   type ClientMsg,
@@ -128,14 +132,19 @@ export async function startServer(opts: ServerOptions) {
     }
   }
 
-  type PlaybackCommand = Extract<Command, { action: 'start' | 'stop' | 'selectSong' | 'repeatSection' }>;
+  type PlaybackCommand = Exclude<Command, { action: 'setDrums' | 'setDrumsAll' | 'saveSong' }>;
 
   function applyCommand(state: PlaybackState, cmd: PlaybackCommand): PlaybackState | ErrorCode {
     const t = now();
     const song = songById.get(state.songId)!;
+    const compiled = compileSong(song, state.extraPasses);
+    const bpb = compiled.beatsPerBar;
     switch (cmd.action) {
-      case 'start':
-        return startPlayback(state, t, { beatsPerBar: song.timeSignature[0] });
+      case 'start': {
+        // Picks up where it stopped (or where a seek put it), after a count-in.
+        const parked = stopPlayback(state, t);
+        return startPlayback(parked, t, { startBeat: resumeBeat(parked, compiled), beatsPerBar: bpb });
+      }
       case 'stop':
         return stopPlayback(state, t);
       case 'selectSong': {
@@ -143,7 +152,22 @@ export async function startServer(opts: ServerOptions) {
         return next ? loadSong(next, t) : 'song-not-found';
       }
       case 'repeatSection':
-        return repeatSection(state, compileSong(song, state.extraPasses), cmd.sectionIndex, t) ?? 'too-late';
+        // The loop's end is in beats, so growing a section under it would cut the loop short.
+        if (state.loop) return 'looping';
+        return repeatSection(state, compiled, cmd.sectionIndex, t) ?? 'too-late';
+      case 'seek': {
+        const section = compiled.sections[cmd.sectionIndex];
+        if (!section || cmd.bar >= section.barCount) return 'bad-position';
+        return seekTo(state, t, section.startBeat + cmd.bar * bpb, bpb);
+      }
+      case 'setBpm':
+        return setBpm(state, t, cmd.bpm, bpb);
+      case 'setLoop': {
+        if (cmd.sectionIndex === null) return setLoop(state, t, null, bpb);
+        const section = compiled.sections[cmd.sectionIndex];
+        if (!section) return 'bad-position';
+        return setLoop(state, t, { startBeat: section.startBeat, endBeat: section.startBeat + section.barCount * bpb }, bpb);
+      }
     }
   }
 
