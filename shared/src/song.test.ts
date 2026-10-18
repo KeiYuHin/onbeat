@@ -28,6 +28,10 @@ describe('parseSong', () => {
     [{ sections: { intro: { bars: [[]] } }, form: ['intro'] }, /bar 1/],
     [{ parts: { banjo: { default: {} } } }, /unknown part "banjo"/],
     [{ parts: { guitar1: { label: 'x', default: { strum: 'DXU' } } } }, /strum/],
+    [{ parts: { drums: { label: 'x', default: { pattern: { cowbell: 'x'.repeat(16) } } } } }, /unknown drum "cowbell"/],
+    [{ parts: { drums: { label: 'x', default: { pattern: { kick: 'x...' } } } } }, /16 steps/],
+    [{ parts: { drums: { label: 'x', default: {}, sections: { coda: {} } } } }, /unknown section "coda"/],
+    [{ parts: { drums: { label: 'x', default: {}, sections: { verse: { strum: 'Q' } } } } }, /section "verse" strum/],
   ])('rejects %j', (patch, error) => {
     expect(() => parseSong({ ...example, ...patch })).toThrow(error);
   });
@@ -93,8 +97,9 @@ describe('songPosition', () => {
 
 describe('partDetail', () => {
   it('applies section overrides on top of the default', () => {
-    expect(partDetail(example, 'drums', 'verse')).toEqual({ groove: '基本 8beat' });
-    expect(partDetail(example, 'drums', 'chorus')).toEqual({ groove: '8beat + 镲' });
+    expect(partDetail(example, 'guitar1', 'verse')).toEqual({ strum: 'D-DU-UDU' });
+    expect(partDetail(example, 'drums', 'verse')?.groove).toBe('基本 8beat');
+    expect(partDetail(example, 'drums', 'chorus')).toMatchObject({ groove: '8beat + 叮叮镲', pattern: { ride: expect.any(String) } });
   });
 
   it('is null for parts the song does not have', () => {

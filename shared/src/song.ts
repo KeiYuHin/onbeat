@@ -1,8 +1,14 @@
 // Song skeleton (sections, bars, chords) shared by all parts, plus per-part details. See SPEC.md.
 import { PARTS, type Part } from './protocol';
 
-/** M2.5 drum machine: 16-step strings per instrument, e.g. { kick: 'x...x...x...x...' }. */
-export type DrumPattern = Record<string, string>;
+export const DRUMS = ['kick', 'snare', 'hat', 'crash', 'ride', 'tom'] as const;
+export type Drum = (typeof DRUMS)[number];
+
+/**
+ * Drum machine bar: one step per sixteenth note (16 steps in 4/4) per instrument,
+ * `x` hit, `X` accent, `.` rest. E.g. { kick: 'x...x...x...x...' }.
+ */
+export type DrumPattern = Partial<Record<Drum, string>>;
 
 export type PartDetail = {
   strum?: string; // one char per eighth note: D down, U up, - rest
@@ -65,11 +71,25 @@ export function parseSong(data: unknown): Song {
   if (!Array.isArray(s.form) || s.form.length === 0) fail('form must list at least one section');
   for (const id of s.form) if (!(id in s.sections)) fail(`form refers to unknown section "${id}"`);
   if (typeof s.parts !== 'object' || s.parts === null) fail('missing parts');
+  const steps = ts[0] * 4;
+  const checkDetail = (where: string, d: any) => {
+    if (d.strum !== undefined && !/^[DU-]+$/.test(d.strum)) fail(`${where} strum may only use D, U and -`);
+    if (typeof d.pattern !== 'object' || d.pattern === null) return;
+    for (const [drum, row] of Object.entries<any>(d.pattern)) {
+      if (!DRUMS.includes(drum as Drum)) fail(`${where} pattern has unknown drum "${drum}" (expected ${DRUMS.join(', ')})`);
+      if (typeof row !== 'string' || !/^[xX.]+$/.test(row) || row.length !== steps)
+        fail(`${where} pattern "${drum}" must be ${steps} steps of x, X or .`);
+    }
+  };
   for (const [part, spec] of Object.entries<any>(s.parts)) {
     if (!PARTS.includes(part as Part)) fail(`unknown part "${part}" (expected one of ${PARTS.join(', ')})`);
     if (typeof spec?.default !== 'object' || spec.default === null) fail(`part "${part}" needs a default`);
-    if (spec.default.strum !== undefined && !/^[DU-]+$/.test(spec.default.strum))
-      fail(`part "${part}" strum may only use D, U and -`);
+    checkDetail(`part "${part}"`, spec.default);
+    for (const [id, d] of Object.entries<any>(spec.sections ?? {})) {
+      if (!(id in s.sections)) fail(`part "${part}" refers to unknown section "${id}"`);
+      if (typeof d !== 'object' || d === null) fail(`part "${part}" section "${id}" must be an object`);
+      checkDetail(`part "${part}" section "${id}"`, d);
+    }
   }
   return s as Song;
 }
