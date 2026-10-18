@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OnBeat is a PWA for band rehearsal. Each member opens a shared 6-digit room on their own phone and picks a part (guitar1 / guitar2 / bass / drums / keys). Any member can start or stop, and every device shows the same bar and beat, all driven by one shared clock. `SPEC.md` (written in Chinese) is the source of truth for scope, the sync model, the song format and the milestones. Read it before starting a milestone.
 
-Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 has passed multi-device testing. M2.5 has passed phone testing. Waiting for phone testing: the M2.5 follow-up (loop view, 再绕一遍, a portrait fix for the sound settings, room drum editor) and M3 (seek, loop a section, tempo, start from bar X).
+Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M3.9 deploy + private song library (Cloudflare Worker/Durable Object/R2, library-key links; see SPEC) → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 through M3 have passed phone testing (LAN RTT is about 7–9ms). Next is M3.9. Known bug, not yet investigated: on mobile, the "点一下屏幕开启声音" audio-unlock banner (`web/src/Room.tsx`) may misbehave.
 
 ## Commands
 
