@@ -2,7 +2,7 @@
 
 Band rehearsal sync: each member sees their own part on their own phone, and everyone moves through the same bar and beat on one shared clock. See `SPEC.md` for the full design.
 
-Current milestone: **M2.5 metronome + drum machine**. Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Any device can also play a click and/or a 16-step drum machine, locked to the same shared clock.
+Current milestone: **M3 rehearsal controls**. Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Any device can also play a click and/or a 16-step drum machine, locked to the same shared clock. Any member can jump to a section or bar, loop a section and change the tempo for the whole room.
 
 ## Run locally (rehearsal-room laptop)
 
@@ -27,13 +27,24 @@ OnBeat server listening on port 8787
 2. Open the "phones on the same Wi-Fi" address in the phone's browser.
 3. On one device, pick a part and tap **创建新房间** (create a new room). The room code appears at the top, and the address bar now contains `?room=xxxxxx`, so you can share that link directly.
 4. On the other devices, pick a part, enter the code, and tap **加入** (join). To change part later, tap your part next to the room code; there's no need to leave.
-5. Anyone can tap **开始** (start). After about 1.5s comes a one-bar count-in (预备), then the song plays from the top on every device. Beat dots at the top right flash orange on the downbeat and blue on the other beats.
+5. Anyone can tap **开始** (start). After about 1.5s comes a one-bar count-in (预备), then the song plays on every device. Beat dots at the top right flash orange on the downbeat and blue on the other beats.
+
+### Rehearsal controls (whole room)
+
+- **停止 / 开始** picks up where you stopped: the top line says 从 副歌 2 第 3 小节开始, and 开始 counts in one bar and plays from the start of that bar. **⏮ 从头** (next to 开始) goes back to the top. Once the song has ended, 开始 starts from the top.
+- **Tap a section in the timeline** at the bottom to jump there. While playing, the jump happens at the next barline (at least 0.3s away, so every phone gets it in time). The top line shows 下一小节 → 主歌 2 第 1 小节 until it happens. While stopped, it just moves the start point.
+- **排练** (next to 开始) opens the controls:
+  - **速度**: −5 / −1 / +1 / +5, or 70% / 80% / 90% / 原速 of the song's tempo. While playing, the change also waits for the next barline, and the top line shows `96 → 101 BPM`. Picking another song resets the tempo.
+  - **跳到这里** jumps to a section. Tap the section name to open its bars, then tap a bar to play **从第 X 小节**.
+  - **循环** loops a section (all its passes) until **取消循环**. If you're elsewhere, it jumps there at the next barline. The section shows 🔁 循环中 and has no 最后一遍 or next-section preview. Jumping outside the loop ends it. 再绕一遍 is off while looping.
+
+The metronome and drum machine follow jumps, loops and tempo changes exactly, because they are scheduled from the same timeline.
 
 ### Loop view and 再绕一遍
 
 The middle panel shows one pass of the current section as bar cards (for example C Am F G), with the cursor going round them and **第 2 / 4 遍** at the top right. A section written as 8 bars that is really 4 bars twice is detected automatically. On the last pass the counter turns orange (**最后一遍**) and the next section is previewed underneath (下一段：副歌 · F G C Am).
 
-**再绕一遍** adds one more pass of the current section for everyone, for when the band decides on the spot to go round again. It is refused in the section's last beat (too late to reach every phone in time). A fresh 开始 plays the song as written again.
+**再绕一遍** adds one more pass of the current section for everyone, for when the band decides on the spot to go round again. It is refused in the section's last beat (too late to reach every phone in time). Starting again from the top plays the song as written; restarting from a later bar keeps the extra passes, so the bars stay where they were.
 
 ### Drum machine editor (whole room)
 
