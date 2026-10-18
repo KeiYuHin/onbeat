@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   barPosition,
   beatAt,
@@ -13,14 +13,25 @@ import {
   type Part,
   type PartDetail,
   type PlaybackState,
+  type SectionSpan,
+  type SongPosition,
 } from '@onbeat/shared';
 
 const STRUM_GLYPHS: Record<string, string> = { D: '↓', U: '↑', '-': '·' };
 
-type Props = { clock: ClockSync; playback: PlaybackState; compiled: CompiledSong; part: Part; flash: boolean };
+type Props = {
+  clock: ClockSync;
+  playback: PlaybackState;
+  compiled: CompiledSong;
+  part: Part;
+  flash: boolean;
+  /** "再绕一遍" for the section at this form index. */
+  onRepeat: (sectionIndex: number) => void;
+  onEditDrums: () => void;
+};
 
 /** Re-renders every animation frame; everything shown is derived from the shared clock, never counted locally. */
-export function ScoreView({ clock, playback, compiled, part, flash }: Props) {
+export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onEditDrums }: Props) {
   const [, setFrame] = useState(0);
   useEffect(() => {
     let id = requestAnimationFrame(function tick() {
@@ -67,12 +78,16 @@ export function ScoreView({ clock, playback, compiled, part, flash }: Props) {
       </div>
 
       <div className={`chord-panel${beatFlash ? (beatInBar === 1 ? ' flash accent' : ' flash') : ''}`}>
-        <div className={`chord${live ? '' : ' dim'}`}>{shown?.chord ?? '—'}</div>
-        {shown?.next && (
-          <div className="next">
-            下一个 <strong>{shown.next.chord}</strong>
-            {live && <span className="in"> {Math.ceil(shown.next.inBeats)} 拍后</span>}
-          </div>
+        {shown ? (
+          <LoopView
+            compiled={compiled}
+            shown={shown}
+            beat={beat}
+            live={live}
+            onRepeat={playback.playing ? onRepeat : null}
+          />
+        ) : (
+          <div className="chord dim">—</div>
         )}
       </div>
 
@@ -84,6 +99,11 @@ export function ScoreView({ clock, playback, compiled, part, flash }: Props) {
           <div className="detail muted">这首歌没有写这个声部，跟和弦走</div>
         )}
         {spec?.notes && <div className="notes">{spec.notes}</div>}
+        {part === 'drums' && (
+          <button className="small edit-drums" onClick={onEditDrums}>
+            编辑鼓谱
+          </button>
+        )}
       </div>
 
       <ol className="timeline">
@@ -94,13 +114,101 @@ export function ScoreView({ clock, playback, compiled, part, flash }: Props) {
           return (
             <li key={i} className={active ? 'active' : past ? 'past' : ''}>
               {active && <span className="progress" style={{ width: `${progress * 100}%` }} />}
-              <span className="name">{s.label}</span>
+              <span className="name">
+                {s.label}
+                {s.times > 1 && <small> ×{s.times}</small>}
+              </span>
             </li>
           );
         })}
       </ol>
     </div>
   );
+}
+
+/** Bars of one pass shown as cards; the cursor goes round them while the pass counter climbs. */
+function LoopView({
+  compiled,
+  shown,
+  beat,
+  live,
+  onRepeat,
+}: {
+  compiled: CompiledSong;
+  shown: SongPosition;
+  beat: number;
+  live: boolean;
+  onRepeat: ((sectionIndex: number) => void) | null;
+}) {
+  const { beatsPerBar: bpb } = compiled;
+  const section = shown.section;
+  const sectionIndex = compiled.sections.indexOf(section);
+  const loopBeats = section.loopBars * bpb;
+  const inSection = beat - section.startBeat;
+  const pass = live ? Math.floor(inSection / loopBeats) : 0;
+  const card = live ? Math.floor(inSection / bpb) % section.loopBars : -1;
+  const inBar = inSection - Math.floor(inSection / bpb) * bpb;
+  const looped = section.times > 1;
+  const lastPass = live && pass === section.times - 1;
+  const remainingBars = section.barCount - Math.floor(inSection / bpb);
+  const next = compiled.sections[sectionIndex + 1];
+  const bars = compiled.bars.slice(section.startBar, section.startBar + section.loopBars);
+  const cols = Math.min(bars.length, 4);
+
+  return (
+    <div className="loop">
+      <div className="loop-head">
+        <span className="section-name">{section.label}</span>
+        {looped && (
+          <span className={`pass${lastPass ? ' last' : ''}`}>
+            {lastPass && '最后一遍 · '}第 {pass + 1} / {section.times} 遍
+          </span>
+        )}
+        {onRepeat && (
+          <button className="repeat" onClick={() => onRepeat(sectionIndex)}>
+            再绕一遍
+          </button>
+        )}
+      </div>
+      <div className="cards" style={{ '--cols': cols, '--rows': Math.ceil(bars.length / cols) } as CSSProperties}>
+        {bars.map((bar, i) => {
+          const current = i === card;
+          const slot = current ? Math.floor((inBar * bar.chords.length) / bpb) : -1;
+          const chars = bar.chords.join(' ').length;
+          return (
+            <div key={i} className={`card${current ? ' current' : ''}${live ? '' : ' dim'}`}>
+              <div className="card-chords" style={{ '--scale': Math.min(1, 2.6 / chars) } as CSSProperties}>
+                {bar.chords.map((c, j) => (
+                  <span key={j} className={j === slot && bar.chords.length > 1 ? 'now' : ''}>
+                    {c}
+                  </span>
+                ))}
+              </div>
+              <div className="card-dots">
+                {Array.from({ length: bpb }, (_, j) => (
+                  <span key={j} className={current && j === Math.floor(inBar) ? 'on' : ''} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {live && next && lastPass && remainingBars <= Math.min(section.loopBars, 4) && (
+        <div className="preview">
+          下一段：<strong>{next.label}</strong> · {previewChords(compiled, next)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "F G C Am": the chords of one pass of a section, repeats of the same chord merged. */
+function previewChords(compiled: CompiledSong, section: SectionSpan): string {
+  const chords = compiled.bars
+    .slice(section.startBar, section.startBar + section.loopBars)
+    .flatMap((b) => b.chords)
+    .filter((c, i, all) => i === 0 || c !== all[i - 1]);
+  return chords.length > 8 ? `${chords.slice(0, 8).join(' ')} …` : chords.join(' ');
 }
 
 function Dots({ count, current, flash }: { count: number; current: number; flash: boolean }) {

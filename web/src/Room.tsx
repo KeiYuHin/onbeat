@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { compileSong, PART_LABELS, type ErrorCode, type Part } from '@onbeat/shared';
+import {
+  applyDrumEdits,
+  beatAt,
+  compileSong,
+  PART_LABELS,
+  songPosition,
+  type ErrorCode,
+  type Part,
+} from '@onbeat/shared';
 import { AudioEngine } from './audio/engine';
 import { useSoundSettings } from './audio/settings';
 import { RoomConnection, type RoomTarget } from './connection';
+import { DrumEditor } from './DrumEditor';
 import { ScoreView } from './ScoreView';
+import { Sheet } from './Sheet';
 import { SoundPanel } from './SoundPanel';
 import { useWakeLock, type WakeLockStatus } from './wakeLock';
 
@@ -47,14 +57,26 @@ function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
   const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
   const [sound, setSound] = useSoundSettings();
-  const [showSound, setShowSound] = useState(false);
+  const [sheet, setSheet] = useState<null | 'sound' | { drums: string | null }>(null);
 
   useEffect(() => {
     if (snap.room && snap.memberId) onRoom(snap.room);
   }, [snap.room, snap.memberId, onRoom]);
 
-  const song = snap.songs.find((s) => s.id === snap.playback?.songId);
-  const compiled = useMemo(() => song && compileSong(song), [song]);
+  const songId = snap.playback?.songId;
+  const baseSong = snap.songs.find((s) => s.id === songId);
+  const drumEdits = snap.edits && snap.edits.songId === songId ? snap.edits.drums : null;
+  // New state objects arrive for every command; only recompile when the passes actually change.
+  const passesKey = JSON.stringify(snap.playback?.extraPasses ?? {});
+  const compiled = useMemo(
+    () => baseSong && compileSong(applyDrumEdits(baseSong, drumEdits), JSON.parse(passesKey)),
+    [baseSong, drumEdits, passesKey],
+  );
+
+  const openDrumEditor = () => {
+    const pos = snap.playback && compiled && songPosition(compiled, beatAt(snap.playback, conn.clock.serverNow()));
+    setSheet({ drums: pos?.section.id ?? null });
+  };
 
   useEffect(() => {
     audio.update(snap.playback, compiled ?? null, sound);
@@ -106,11 +128,7 @@ function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
             </li>
           ))}
         </ul>
-        <button
-          className={`sound-button${audioStatus === 'on' ? ' on' : ''}`}
-          aria-expanded={showSound}
-          onClick={() => setShowSound((v) => !v)}
-        >
+        <button className={`sound-button${audioStatus === 'on' ? ' on' : ''}`} onClick={() => setSheet('sound')}>
           {audioStatus === 'off' ? '🔇' : '🔊'} 声音
         </button>
         <button className="leave" onClick={onLeave}>
@@ -124,10 +142,17 @@ function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
       {snap.error && <div className="banner">{ERROR_TEXT[snap.error]}</div>}
       {WAKE_LOCK_HINT[wakeLock] && <div className="banner subtle">{WAKE_LOCK_HINT[wakeLock]}</div>}
       {audioStatus === 'locked' && <div className="banner">点一下屏幕开启声音</div>}
-      {showSound && <SoundPanel settings={sound} onChange={setSound} onEnable={() => audio.unlock()} />}
 
       {snap.playback && compiled ? (
-        <ScoreView clock={conn.clock} playback={snap.playback} compiled={compiled} part={part} flash={sound.flash} />
+        <ScoreView
+          clock={conn.clock}
+          playback={snap.playback}
+          compiled={compiled}
+          part={part}
+          flash={sound.flash}
+          onRepeat={(sectionIndex) => conn.command({ action: 'repeatSection', sectionIndex })}
+          onEditDrums={openDrumEditor}
+        />
       ) : (
         <div className="score loading">加载中…</div>
       )}
@@ -139,6 +164,30 @@ function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
       >
         {playing ? '停止' : '开始'}
       </button>
+
+      {sheet === 'sound' && (
+        <Sheet title="声音（只影响本机）" onClose={() => setSheet(null)}>
+          <SoundPanel
+            settings={sound}
+            onChange={setSound}
+            onEnable={() => audio.unlock()}
+            onEditDrums={compiled ? openDrumEditor : undefined}
+          />
+        </Sheet>
+      )}
+      {typeof sheet === 'object' && sheet && compiled && (
+        <Sheet title={`编辑鼓谱 · ${compiled.song.title}`} onClose={() => setSheet(null)}>
+          {/* An error banner inside the sheet, since the room's banners are hidden behind it. */}
+          {snap.error && <div className="banner">{ERROR_TEXT[snap.error]}</div>}
+          <DrumEditor
+            compiled={compiled}
+            edits={drumEdits ?? {}}
+            initialSectionId={sheet.drums}
+            onSet={(sectionId, pattern) => conn.command({ action: 'setDrums', sectionId, pattern })}
+            onSave={() => conn.command({ action: 'saveSong' })}
+          />
+        </Sheet>
+      )}
     </main>
   );
 }

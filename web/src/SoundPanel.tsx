@@ -12,11 +12,12 @@ type Props = {
   onChange: (patch: Partial<SoundSettings>) => void;
   /** Called from the tap that turns sound on, so the browser lets audio start. */
   onEnable: () => void;
+  onEditDrums?: () => void;
 };
 
-export function SoundPanel({ settings: s, onChange, onEnable }: Props) {
+export function SoundPanel({ settings: s, onChange, onEnable, onEditDrums }: Props) {
   return (
-    <section className="sound-panel">
+    <div className="sound-panel">
       <Toggle
         label="本机出声"
         on={s.enabled}
@@ -44,6 +45,7 @@ export function SoundPanel({ settings: s, onChange, onEnable }: Props) {
       <div className="row">
         <Toggle label="鼓机" on={s.drums} onClick={() => onChange({ drums: !s.drums })} />
         <Toggle label="段落加花" on={s.fills} disabled={!s.drums} onClick={() => onChange({ fills: !s.fills })} />
+        {onEditDrums && <button onClick={onEditDrums}>编辑鼓谱（全房间）</button>}
       </div>
       <Toggle label="闪屏" on={s.flash} onClick={() => onChange({ flash: !s.flash })} />
 
@@ -80,7 +82,7 @@ export function SoundPanel({ settings: s, onChange, onEnable }: Props) {
       <p className="muted">
         尽量用有线耳机或音箱。蓝牙耳机通常慢 150–300ms：听到的 click 比屏幕闪烁晚，就把延迟补偿往右调，直到对上。
       </p>
-    </section>
+    </div>
   );
 }
 
