@@ -13,7 +13,8 @@
     "server": "npm run build -w web && npm run start -w server",
     "test": "vitest run",
     "typecheck": "tsc -p shared && tsc -p server && tsc -p web && tsc -p worker",
-    "worker": "npm run build -w web && npm run dev -w worker"
+    "worker": "npm run build -w web && npm run dev -w worker",
+    "deploy": "npm run build -w web && npm run deploy -w worker"
   },
   "devDependencies": {
     "concurrently": "^10.0.6",

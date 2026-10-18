@@ -106,6 +106,23 @@ To try a private library locally:
 
 Without a key you only get the public example song.
 
+## Deploy to Cloudflare
+
+Everything runs from `worker/` with the wrangler installed by `npm install`.
+
+1. Log in once: `npx wrangler login`.
+2. Create the private bucket: `npx wrangler r2 bucket create onbeat-songs`.
+3. First deploy, from the repo root: `npm run deploy`. It prints the `https://onbeat.<your-subdomain>.workers.dev` address. (A new account is asked to pick a workers.dev subdomain first.)
+4. Set the library keys. Make a fresh key (not the local one) and keep it somewhere safe; it is what goes into band links:
+   ```sh
+   node -e "console.log(require('crypto').randomBytes(16).toString('base64url'))"
+   echo '{"band":"<the key>"}' | npx wrangler secret put LIBRARY_KEYS
+   ```
+5. Upload the library: `node scripts/sync-library.mjs ../../onbeat-library band --remote`.
+6. Open `https://onbeat.<subdomain>.workers.dev/#k=<the key>` on each phone once.
+
+After that, pushes to `main` deploy through `.github/workflows/deploy.yml`, once the repo has two secrets: `CLOUDFLARE_API_TOKEN` (a token from the "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID` (`npx wrangler whoami` shows it). Set them with `gh secret set CLOUDFLARE_API_TOKEN` and `gh secret set CLOUDFLARE_ACCOUNT_ID`.
+
 ## Licenses
 
 | Component | License |
