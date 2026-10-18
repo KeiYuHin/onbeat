@@ -581,8 +581,21 @@ button.small {
 .presets button {
   background: #333;
 }
-.editor-actions .save {
+.editor-actions .save,
+.editor-actions .apply-all {
   background: var(--start);
+}
+.drum-row.beats {
+  height: 1.2em;
+}
+.beat-number {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.beat-number.beat:not(:nth-child(2)) {
+  margin-left: 6px;
 }
 .editor-grid {
   display: flex;

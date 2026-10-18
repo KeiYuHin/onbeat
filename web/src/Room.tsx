@@ -207,6 +207,7 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
             edits={drumEdits ?? {}}
             initialSectionId={sheet.drums}
             onSet={(sectionId, pattern) => conn.command({ action: 'setDrums', sectionId, pattern })}
+            onSetAll={(pattern) => conn.command({ action: 'setDrumsAll', pattern })}
             onSave={() => conn.command({ action: 'saveSong' })}
           />
         </Sheet>

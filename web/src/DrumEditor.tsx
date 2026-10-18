@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   defaultDrumPattern,
   drumPresets,
@@ -10,6 +10,7 @@ import {
   type Drum,
   type DrumEdits,
   type DrumPattern,
+  type SectionDrumEdit,
 } from '@onbeat/shared';
 
 const DRUM_LABELS: Record<Drum, string> = {
@@ -21,35 +22,50 @@ const DRUM_LABELS: Record<Drum, string> = {
   tom: '通鼓',
 };
 const NEXT_HIT: Record<string, string> = { '.': 'x', x: 'X', X: '.' };
-const STEPS_PER_CHUNK = 8; // two beats per row, so the grid stays tappable on a phone
+/** On narrow screens a bar is split into rows of two beats, so cells stay big enough to tap. */
+const NARROW_STEPS = 8;
+const WIDE_QUERY = '(min-width: 700px)';
+
+function useWide() {
+  const [wide, setWide] = useState(() => matchMedia(WIDE_QUERY).matches);
+  useEffect(() => {
+    const mq = matchMedia(WIDE_QUERY);
+    const onChange = () => setWide(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return wide;
+}
 
 type Props = {
   /** The song with the room's edits already applied. */
   compiled: CompiledSong;
   edits: DrumEdits;
   initialSectionId: string | null;
-  onSet: (sectionId: string | null, pattern: DrumPattern | null) => void;
+  onSet: (sectionId: string | null, pattern: SectionDrumEdit | null) => void;
+  onSetAll: (pattern: DrumPattern) => void;
   onSave: () => void;
 };
 
-/** Edits the drum machine pattern of the whole song or of one section; every change syncs to the room. */
-export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSave }: Props) {
+/**
+ * Edits the drum machine patterns: one for the whole song (全曲默认), which every section uses
+ * unless it has a pattern of its own. Every change syncs to the room.
+ */
+export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll, onSave }: Props) {
   const { song, beatsPerBar } = compiled;
   const steps = beatsPerBar * 4;
+  const chunkSteps = useWide() ? steps : NARROW_STEPS;
   const sectionIds = [...new Set(song.form)];
   const [target, setTarget] = useState<string | null>(initialSectionId);
 
   const own = (id: string | null): DrumPattern | null => {
     const p = id === null ? song.parts.drums?.default.pattern : song.parts.drums?.sections?.[id]?.pattern;
-    return typeof p === 'object' ? p : null;
+    return p && typeof p === 'object' ? p : null;
   };
   const songDefault = own(null) ?? defaultDrumPattern(beatsPerBar);
-  const effective = (id: string | null) => {
-    const p = id === null ? null : partDetail(song, 'drums', id)?.pattern;
-    return p && typeof p === 'object' ? p : songDefault;
-  };
-  const pattern = effective(target);
+  const pattern = (target !== null && own(target)) || songDefault;
   const edited = target === null ? !!edits.default : !!edits.sections?.[target];
+  const withOwn = sectionIds.filter((id) => own(id));
 
   const toggle = (drum: Drum, step: number) => {
     const row = (pattern[drum] ?? '.'.repeat(steps)).split('');
@@ -69,10 +85,21 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSave }:
         {sectionIds.map((id) => (
           <button key={id} className={target === id ? 'selected' : ''} onClick={() => setTarget(id)}>
             {sectionName(song, id)}
-            {!own(id) && <small>（跟默认）</small>}
+            <small>{own(id) ? '（单独）' : '（跟默认）'}</small>
           </button>
         ))}
       </div>
+
+      {target === null ? (
+        <p className="muted">
+          全曲默认：没有单独节奏型的段落都用这个。
+          {withOwn.length > 0 && <> 现在单独设置的：{withOwn.map((id) => sectionName(song, id)).join('、')}。</>}
+        </p>
+      ) : (
+        <p className="muted">
+          {own(target) ? `${sectionName(song, target)}用自己的节奏型。` : `${sectionName(song, target)}现在跟全曲默认；一改就变成单独的。`}
+        </p>
+      )}
 
       <div className="presets">
         {drumPresets(beatsPerBar).map((p) => (
@@ -82,42 +109,59 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSave }:
         ))}
       </div>
 
+      <div className="editor-grid">
+        {Array.from({ length: Math.ceil(steps / chunkSteps) }, (_, chunk) => {
+          const first = chunk * chunkSteps;
+          const count = Math.min(chunkSteps, steps - first);
+          return (
+            <div key={chunk} className="chunk">
+              <div className="drum-row beats">
+                <span className="drum-name" />
+                {Array.from({ length: count }, (_, i) => (
+                  <span key={i} className={`beat-number${(first + i) % 4 === 0 ? ' beat' : ''}`}>
+                    {(first + i) % 4 === 0 ? (first + i) / 4 + 1 : ''}
+                  </span>
+                ))}
+              </div>
+              {DRUMS.map((drum) => (
+                <div key={drum} className="drum-row">
+                  <span className="drum-name">{DRUM_LABELS[drum]}</span>
+                  {Array.from({ length: count }, (_, i) => {
+                    const step = first + i;
+                    const hit = pattern[drum]?.[step] ?? '.';
+                    return (
+                      <button
+                        key={step}
+                        aria-label={`${DRUM_LABELS[drum]} 第 ${step + 1} 步`}
+                        className={`cell${hit === 'X' ? ' hit accent' : hit === 'x' ? ' hit' : ''}${step % 4 === 0 ? ' beat' : ''}`}
+                        onClick={() => toggle(drum, step)}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
       <p className="muted">点格子：空 → 敲 → 重音 → 空。改动马上同步给房间里所有人。</p>
 
-      <div className="editor-grid">
-        {Array.from({ length: Math.ceil(steps / STEPS_PER_CHUNK) }, (_, chunk) => (
-          <div key={chunk} className="chunk">
-            {DRUMS.map((drum) => (
-              <div key={drum} className="drum-row">
-                <span className="drum-name">{DRUM_LABELS[drum]}</span>
-                {Array.from({ length: Math.min(STEPS_PER_CHUNK, steps - chunk * STEPS_PER_CHUNK) }, (_, i) => {
-                  const step = chunk * STEPS_PER_CHUNK + i;
-                  const hit = pattern[drum]?.[step] ?? '.';
-                  return (
-                    <button
-                      key={step}
-                      aria-label={`${DRUM_LABELS[drum]} 第 ${step + 1} 步`}
-                      className={`cell${hit === 'X' ? ' hit accent' : hit === 'x' ? ' hit' : ''}${step % 4 === 0 ? ' beat' : ''}`}
-                      onClick={() => toggle(drum, step)}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-
       <div className="editor-actions">
-        {edited && (
-          <button onClick={() => onSet(target, null)}>撤销这里的改动</button>
+        {target === null && withOwn.length > 0 && (
+          <button className="apply-all" onClick={() => onSetAll(songDefault)}>
+            所有段落都用这个节奏
+          </button>
         )}
+        {target !== null && own(target) && <button onClick={() => onSet(target, 'default')}>改回跟全曲默认</button>}
+        {edited && <button onClick={() => onSet(target, null)}>撤销这里的改动</button>}
         <button className="save" disabled={!hasDrumEdits(edits)} onClick={onSave}>
           保存到歌曲文件
         </button>
       </div>
       <p className="muted">
-        {hasDrumEdits(edits) ? '有未保存的改动：房间解散或换歌后就没了，保存后写进服务器上的歌曲文件。' : '没有未保存的改动。'}
+        {hasDrumEdits(edits)
+          ? '有未保存的改动：房间解散或换歌后就没了，保存后写进服务器上的歌曲文件。'
+          : '没有未保存的改动。'}
       </p>
     </div>
   );
