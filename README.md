@@ -42,7 +42,7 @@ The metronome and drum machine follow jumps, loops and tempo changes exactly, be
 
 ### Loop view and 再绕一遍
 
-The middle panel shows one pass of the current section as bar cards (for example C Am F G), with the cursor going round them and **第 2 / 4 遍** at the top right. A section written as 8 bars that is really 4 bars twice is detected automatically. On the last pass the counter turns orange (**最后一遍**) and the next section is previewed underneath (下一段：副歌 · F G C Am).
+The middle panel shows one pass of the current section as bar cards (for example C Am F G), with the cursor going round them and **第 2 / 4 遍** at the top right. A section written as 8 bars that is really 4 bars twice is detected automatically. On the last pass the counter turns orange (**最后一遍**) and the next section is previewed underneath (下一段：副歌 · F G C Am). The last bar card also splits in two: its own chord on top, and the next section's first chord large underneath (→ 副歌 · F). When that bar is playing, the bottom half turns solid orange. A jump waiting for the barline shows its target the same way on the current card.
 
 **再绕一遍** adds one more pass of the current section for everyone, for when the band decides on the spot to go round again. It is refused in the section's last beat (too late to reach every phone in time). Starting again from the top plays the song as written; restarting from a later bar keeps the extra passes, so the bars stay where they were.
 
@@ -57,6 +57,7 @@ Tap **🔊 声音** in the top bar. Settings are stored on each device and never
 - **本机出声**: master switch. Usually only the device on the speaker plays the drum machine; others leave it off or listen to a click in their own headphones.
 - **节拍器** with 四分 / 八分 / 十六分 subdivisions (downbeat is higher). **预备拍出声** clicks the count-in bar even when the metronome is off.
 - **鼓机** plays the song's `drums` pattern (or a basic beat if the song has none). **段落加花** adds a fill in the last bar of each section and a crash on the next downbeat.
+- **根音贝斯** plays the root of each chord (the bass note for slash chords like `G/B`) as a synthesized bass, for practising along. Rhythm: **长音** (one held note per chord), **四分** or **八分**. Tone: **贝斯** (a filtered sawtooth in the real bass range, whose overtones still come through phone speakers) or **正弦** (a pure sine an octave higher; clean in headphones). Chords that don't start with a note letter (N.C.) are skipped.
 - **闪屏** flashes the chord panel on every beat (orange on beat 1), so you can follow without sound.
 - **本机延迟补偿** (±300ms): use wired headphones or a speaker if you can. Bluetooth is typically 150–300ms late; if the click sounds later than the screen flash, move the slider right until they line up.
 
