@@ -6,16 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OnBeat is a PWA for band rehearsal. Each member opens a shared 6-digit room on their own phone and picks a part (guitar1 / guitar2 / bass / drums / keys). Any member can start or stop, and every device shows the same bar and beat, all driven by one shared clock. `SPEC.md` (written in Chinese) is the source of truth for scope, the sync model, the song format and the milestones. Read it before starting a milestone.
 
-Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M3.9 deploy + private song library (Cloudflare Worker/Durable Object/R2, library-key links; see SPEC) → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 through M3 have passed phone testing (LAN RTT is about 7–9ms). M3.9 is in progress: library interface, room split, Worker + Durable Objects, R2 libraries with key links and QR, and CI deploy are done and live at https://onbeat.yuxuan-qi.workers.dev (RTT about 25ms); still to do are the library repo's R2 sync Action and in-app saving through GitHub, then phone testing over the internet. Known bug, not yet investigated: on mobile, the "点一下屏幕开启声音" audio-unlock banner (`web/src/Room.tsx`) may misbehave.
+Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M3.9 deploy + private song library (Cloudflare Worker/Durable Object/R2, library-key links; see SPEC) → M4 content (editor, ChordPro, alphaTab) → M4.5 scale-degree charts (级数谱, PDF import) → M5 later. Status: M1 through M3 have passed phone testing (LAN RTT is about 7–9ms). M3.9 is built: library interface, room split, Worker + Durable Objects, R2 libraries with key links and QR, CI deploy, the library repo's R2 sync Action and in-app saving through GitHub are all live at https://onbeat.yuxuan-qi.workers.dev (RTT about 25ms; a save → commit → sync round trip was checked on 2026-10-18). Still to do: phone testing over the internet. Known bug, not yet investigated: on mobile, the "点一下屏幕开启声音" audio-unlock banner (`web/src/Room.tsx`) may misbehave.
 
 ## Commands
 
-Node 24+, npm workspaces (`shared`, `server`, `web`). Run everything from the repo root.
+Node 24+, npm workspaces (`shared`, `server`, `web`, `worker`). Run everything from the repo root.
 
 - `npm run dev`: server on :8787 (tsx watch) plus Vite on :5173. Vite proxies `/ws` to the server and listens on the LAN.
 - `npm run server`: builds `web/dist`, then serves the app and `/ws` on a single port (`PORT`, default 8787). This is the rehearsal-room (LAN) mode.
 - `npm run worker`: builds `web/dist`, then runs the Cloudflare Worker and Durable Objects locally with `wrangler dev` on :8788 (LAN-reachable). No Cloudflare account needed; local DO storage lives in `worker/.wrangler/` and survives restarts.
-- `npm test`: runs vitest over `shared/src/**/*.test.ts` and `server/src/**/*.test.ts`. The worker has no automated tests yet; check it against `wrangler dev` with a WebSocket script.
+- `npm test`: runs vitest over `shared`, `server` and `worker` `src/**/*.test.ts`. Worker tests cover only `libraries.ts` (fake bucket, fake GitHub); check the Durable Object transport against `wrangler dev` with a WebSocket script.
 - Single file: `npx vitest run server/src/sync.sim.test.ts`. Single test: `npx vitest run -t "late joiner"`.
 - `npm run typecheck`: runs `tsc` over each package. There is no linter.
 
