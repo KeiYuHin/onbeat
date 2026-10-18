@@ -6,6 +6,7 @@ import {
   type Part,
   type PlaybackState,
   type ServerMsg,
+  type Song,
 } from '@onbeat/shared';
 
 export type Snapshot = {
@@ -14,6 +15,7 @@ export type Snapshot = {
   memberId: string | null;
   members: Member[];
   playback: PlaybackState | null;
+  songs: Song[];
   error: ErrorCode | null;
 };
 
@@ -36,6 +38,7 @@ export class RoomConnection {
     memberId: null,
     members: [],
     playback: null,
+    songs: [],
     error: null,
   };
 
@@ -104,6 +107,8 @@ export class RoomConnection {
         return this.update({ playback: msg.state });
       case 'members':
         return this.update({ members: msg.members });
+      case 'songs':
+        return this.update({ songs: msg.songs });
       case 'error':
         return this.update({ error: msg.code });
     }

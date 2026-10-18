@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PARTS, PART_LABELS, ROOM_CODE_RE, type Part } from '@onbeat/shared';
 import type { RoomTarget } from './connection';
-import { Room } from './RoomView';
+import { Room } from './Room';
 
 const PART_KEY = 'onbeat.part';
 
