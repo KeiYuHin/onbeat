@@ -14,6 +14,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   'room-not-found': '房间不存在（可能已过期或服务器重启了）',
   'bad-message': '消息格式错误',
   'not-in-room': '还没有进入房间',
+  'song-not-found': '找不到这首歌',
 };
 
 type Props = { part: Part; onLeave: () => void; onRoom: (room: string) => void };

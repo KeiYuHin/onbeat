@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startServer } from './server';
-import { TestClient } from './testClient';
+import { TEST_SONGS, TestClient } from './testClient';
 
 let server: Awaited<ReturnType<typeof startServer>>;
 const clients: TestClient[] = [];
@@ -11,7 +11,7 @@ const connect = async () => {
 };
 
 beforeEach(async () => {
-  server = await startServer({ port: 0, emptyRoomTtlMs: 50 });
+  server = await startServer({ songs: TEST_SONGS, port: 0, emptyRoomTtlMs: 50 });
 });
 afterEach(async () => {
   clients.splice(0).forEach((c) => c.close());
@@ -69,6 +69,29 @@ describe('rooms', () => {
 
     a.send({ type: 'cmd', action: 'stop' });
     expect((await b.next('state')).state.playing).toBe(false);
+  });
+
+  it('sends the song catalog and starts new rooms on the first song', async () => {
+    const a = await connect();
+    a.send({ type: 'create', part: 'guitar1' });
+    expect((await a.next('songs')).songs.map((s) => s.id)).toEqual(['four', 'waltz']);
+    expect((await a.next('state')).state).toMatchObject({ songId: 'four', bpm: 120, playing: false, anchorBeat: 0 });
+  });
+
+  it('switches songs, resetting tempo and position, and counts in by the time signature', async () => {
+    const a = await connect();
+    a.send({ type: 'create', part: 'guitar1' });
+    await a.next('state');
+    a.send({ type: 'cmd', action: 'start' });
+    expect((await a.next('state')).state.anchorBeat).toBe(-4);
+
+    a.send({ type: 'cmd', action: 'selectSong', songId: 'waltz' });
+    expect((await a.next('state')).state).toMatchObject({ songId: 'waltz', bpm: 90, playing: false, anchorBeat: 0 });
+    a.send({ type: 'cmd', action: 'start' });
+    expect((await a.next('state')).state.anchorBeat).toBe(-3);
+
+    a.send({ type: 'cmd', action: 'selectSong', songId: 'nope' });
+    expect((await a.next('error')).code).toBe('song-not-found');
   });
 
   it('forgets a room once it has been empty for the TTL', async () => {

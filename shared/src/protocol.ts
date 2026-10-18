@@ -1,4 +1,5 @@
 // Wire protocol shared by server and web: JSON messages over a single WebSocket.
+import type { Song } from './song';
 
 export const PARTS = ['guitar1', 'guitar2', 'bass', 'drums', 'keys'] as const;
 export type Part = (typeof PARTS)[number];
@@ -15,7 +16,7 @@ export const ROOM_CODE_RE = /^\d{6}$/;
 
 /** The single source of truth for a room, broadcast by the server. */
 export type PlaybackState = {
-  songId: string | null; // null until songs land in M2
+  songId: string;
   playing: boolean;
   bpm: number;
   anchorServerTime: number; // server clock (ms)
@@ -25,7 +26,7 @@ export type PlaybackState = {
 
 export type Member = { id: string; part: Part };
 
-export type Command = { action: 'start' } | { action: 'stop' };
+export type Command = { action: 'start' } | { action: 'stop' } | { action: 'selectSong'; songId: string };
 
 export type ClientMsg =
   | { type: 'create'; part: Part }
@@ -33,14 +34,15 @@ export type ClientMsg =
   | { type: 'ping'; c0: number }
   | ({ type: 'cmd' } & Command);
 
-export type ErrorCode = 'bad-message' | 'room-not-found' | 'not-in-room';
+export type ErrorCode = 'bad-message' | 'room-not-found' | 'not-in-room' | 'song-not-found';
 
 export type ServerMsg =
   | { type: 'welcome'; room: string; memberId: string }
   | { type: 'error'; code: ErrorCode }
   | { type: 'pong'; c0: number; serverTime: number }
   | { type: 'state'; state: PlaybackState }
-  | { type: 'members'; members: Member[] };
+  | { type: 'members'; members: Member[] }
+  | { type: 'songs'; songs: Song[] };
 
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
 
@@ -63,7 +65,10 @@ export function parseClientMsg(raw: string): ClientMsg | null {
     case 'ping':
       return Number.isFinite(m.c0) ? { type: 'ping', c0: m.c0 } : null;
     case 'cmd':
-      return m.action === 'start' || m.action === 'stop' ? { type: 'cmd', action: m.action } : null;
+      if (m.action === 'start' || m.action === 'stop') return { type: 'cmd', action: m.action };
+      if (m.action === 'selectSong' && typeof m.songId === 'string')
+        return { type: 'cmd', action: 'selectSong', songId: m.songId };
+      return null;
     default:
       return null;
   }

@@ -2,7 +2,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { beatAt, msPerBeat } from '@onbeat/shared';
 import { startServer } from './server';
-import { TestClient } from './testClient';
+import { TEST_SONGS, TestClient } from './testClient';
 
 const MAX_ERROR_MS = 20;
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -41,7 +41,7 @@ function errorMs(a: TestClient, b: TestClient): number {
 it(
   'keeps two clients and a late joiner within 20ms under 50–300ms latency',
   async () => {
-    server = await startServer({ port: 0, latencyMs });
+    server = await startServer({ songs: TEST_SONGS, port: 0, latencyMs });
 
     const a = await connect();
     a.send({ type: 'create', part: 'guitar1' });

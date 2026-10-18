@@ -6,18 +6,22 @@ import { performance } from 'node:perf_hooks';
 import sirv from 'sirv';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
-  initialState,
+  loadSong,
   parseClientMsg,
   startPlayback,
   stopPlayback,
   type ClientMsg,
+  type Command,
   type Member,
   type Part,
   type PlaybackState,
   type ServerMsg,
+  type Song,
 } from '@onbeat/shared';
 
 export type ServerOptions = {
+  /** The song catalog; at least one. New rooms start on the first. */
+  songs: Song[];
   port?: number;
   host?: string;
   /** Built web app to serve on the same port, so phones need only one URL. */
@@ -48,8 +52,10 @@ type Conn = {
 
 const HEARTBEAT_MS = 15_000;
 
-export async function startServer(opts: ServerOptions = {}) {
-  const { port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000 } = opts;
+export async function startServer(opts: ServerOptions) {
+  const { songs, port = 8787, host, staticDir, latencyMs, emptyRoomTtlMs = 10 * 60_000 } = opts;
+  if (songs.length === 0) throw new Error('at least one song is required');
+  const songById = new Map(songs.map((s) => [s.id, s]));
   const now = () => performance.now();
   const rooms = new Map<string, Room>();
   const conns = new Set<Conn>();
@@ -94,6 +100,7 @@ export async function startServer(opts: ServerOptions = {}) {
     room.members.set(conn.id, { id: conn.id, part });
     conn.room = room;
     send(conn, { type: 'welcome', room: room.code, memberId: conn.id });
+    send(conn, { type: 'songs', songs });
     send(conn, { type: 'state', state: room.state });
     broadcast(room, { type: 'members', members: [...room.members.values()] });
   }
@@ -110,13 +117,27 @@ export async function startServer(opts: ServerOptions = {}) {
     }
   }
 
+  function applyCommand(state: PlaybackState, cmd: Command): PlaybackState | null {
+    const t = now();
+    switch (cmd.action) {
+      case 'start':
+        return startPlayback(state, t, { beatsPerBar: songById.get(state.songId)!.timeSignature[0] });
+      case 'stop':
+        return stopPlayback(state, t);
+      case 'selectSong': {
+        const song = songById.get(cmd.songId);
+        return song ? loadSong(song, t) : null;
+      }
+    }
+  }
+
   function handle(conn: Conn, msg: ClientMsg) {
     switch (msg.type) {
       case 'ping':
         return send(conn, { type: 'pong', c0: msg.c0, serverTime: now() });
       case 'create': {
         const code = newRoomCode();
-        const room: Room = { code, state: initialState(), members: new Map(), conns: new Set(), expiry: null };
+        const room: Room = { code, state: loadSong(songs[0], now()), members: new Map(), conns: new Set(), expiry: null };
         rooms.set(code, room);
         return enter(conn, room, msg.part);
       }
@@ -128,7 +149,9 @@ export async function startServer(opts: ServerOptions = {}) {
       case 'cmd': {
         const room = conn.room;
         if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
-        room.state = msg.action === 'start' ? startPlayback(room.state, now()) : stopPlayback(room.state, now());
+        const next = applyCommand(room.state, msg);
+        if (!next) return send(conn, { type: 'error', code: 'song-not-found' });
+        room.state = next;
         return broadcast(room, { type: 'state', state: room.state });
       }
     }

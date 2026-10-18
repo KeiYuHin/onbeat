@@ -2,14 +2,13 @@ import type { PlaybackState } from './protocol';
 
 /** Lead time before the count-in starts, so the start command reaches every device first. */
 export const START_LEAD_MS = 1500;
-/** Fixed until songs (with time signatures) arrive in M2. */
 export const DEFAULT_BEATS_PER_BAR = 4;
-export const DEFAULT_BPM = 120;
 
 export const msPerBeat = (bpm: number) => 60000 / bpm;
 
-export function initialState(bpm = DEFAULT_BPM): PlaybackState {
-  return { songId: null, playing: false, bpm, anchorServerTime: 0, anchorBeat: 0 };
+/** Stopped at the top of a song, at the song's own tempo. */
+export function loadSong(song: { id: string; bpm: number }, serverNow = 0): PlaybackState {
+  return { songId: song.id, playing: false, bpm: song.bpm, anchorServerTime: serverNow, anchorBeat: 0 };
 }
 
 /** Continuous beat position at a given server time. Negative beats are lead-in / count-in. */

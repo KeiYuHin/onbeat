@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { barPosition, beatAt, initialState, startPlayback, START_LEAD_MS, stopPlayback } from './timeline';
+import { barPosition, beatAt, loadSong, startPlayback, START_LEAD_MS, stopPlayback } from './timeline';
+
+const idle = (bpm = 120) => loadSong({ id: 'test', bpm });
 
 describe('beatAt', () => {
   it('advances one beat per 60000/bpm ms from the anchor', () => {
-    const s = { ...initialState(120), playing: true, anchorServerTime: 10_000, anchorBeat: 8 };
+    const s = { ...idle(120), playing: true, anchorServerTime: 10_000, anchorBeat: 8 };
     expect(beatAt(s, 10_000)).toBe(8);
     expect(beatAt(s, 10_500)).toBe(9);
     expect(beatAt(s, 12_250)).toBe(12.5);
   });
 
   it('holds still while stopped', () => {
-    const s = { ...initialState(), anchorBeat: 5.25 };
+    const s = { ...idle(), anchorBeat: 5.25 };
     expect(beatAt(s, 0)).toBe(5.25);
     expect(beatAt(s, 1e9)).toBe(5.25);
   });
@@ -18,21 +20,21 @@ describe('beatAt', () => {
 
 describe('startPlayback', () => {
   it('puts a count-in bar after the lead time, so beat 0 lands one bar later', () => {
-    const s = startPlayback(initialState(120), 1000);
+    const s = startPlayback(idle(120), 1000);
     expect(s.playing).toBe(true);
     expect(beatAt(s, 1000 + START_LEAD_MS)).toBe(-4);
     expect(beatAt(s, 1000 + START_LEAD_MS + 4 * 500)).toBe(0);
   });
 
   it('honours startBeat and beatsPerBar', () => {
-    const s = startPlayback(initialState(60), 0, { startBeat: 12, beatsPerBar: 3, leadMs: 0 });
+    const s = startPlayback(idle(60), 0, { startBeat: 12, beatsPerBar: 3, leadMs: 0 });
     expect(beatAt(s, 3000)).toBe(12);
   });
 });
 
 describe('stopPlayback', () => {
   it('keeps the position continuous at the moment of stopping', () => {
-    const playing = startPlayback(initialState(97), 0);
+    const playing = startPlayback(idle(97), 0);
     const t = 7_777;
     const stopped = stopPlayback(playing, t);
     expect(stopped.playing).toBe(false);
