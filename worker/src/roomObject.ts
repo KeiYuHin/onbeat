@@ -51,7 +51,10 @@ export class RoomObject extends DurableObject<Env> {
   private host: RoomHost = {
     now: () => Date.now(),
     songs: () => this.songs,
-    changed: () => void this.ctx.storage.put('room', this.room!.snapshot()),
+    changed: () => {
+      const snapshot = this.room!.snapshot();
+      this.ctx.storage.put('room', snapshot).catch((e) => console.error(`room ${snapshot.code}: saving state failed:`, e));
+    },
   };
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -195,15 +198,22 @@ export class RoomObject extends DurableObject<Env> {
   }
 
   /** While anyone is connected, check for quiet sockets every minute; once empty, expire the room after the TTL. */
+  // A failure here must not escape a socket event: that would reset the object and drop everyone.
+  // Logged with the room and live count, so a failure in the field says which path it was on.
   private async schedule(...closing: WebSocket[]) {
     const storage = this.ctx.storage;
-    if (this.live(closing) > 0) {
-      await storage.delete('emptyAt');
-      await storage.setAlarm(Date.now() + REAP_INTERVAL_MS);
-    } else if (this.room) {
-      const emptyAt = (await storage.get<number>('emptyAt')) ?? Date.now();
-      await storage.put('emptyAt', emptyAt);
-      await storage.setAlarm(emptyAt + EMPTY_ROOM_TTL_MS);
+    const live = this.live(closing);
+    try {
+      if (live > 0) {
+        await storage.delete('emptyAt');
+        await storage.setAlarm(Date.now() + REAP_INTERVAL_MS);
+      } else if (this.room) {
+        const emptyAt = (await storage.get<number>('emptyAt')) ?? Date.now();
+        await storage.put('emptyAt', emptyAt);
+        await storage.setAlarm(emptyAt + EMPTY_ROOM_TTL_MS);
+      }
+    } catch (e) {
+      console.error(`room ${this.room?.code ?? '(none)'}: scheduling with ${live} socket(s) failed:`, e);
     }
   }
 }
