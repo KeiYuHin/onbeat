@@ -1,12 +1,13 @@
 // M2.5 metronome and drum machine as pure functions: sounds are events at beat positions,
 // so every device derives the same events from the shared timeline. The web app schedules them.
-import { partDetail, type CompiledSong, type Drum, type DrumPattern } from './song';
+import { barIndexAt, partDetail, stepsPerBar, type CompiledSong, type Drum, type DrumPattern, type Meter } from './song';
 
 export type SoundName = Drum | 'click' | 'clickAccent' | 'bass';
 /** `note` (MIDI) and `length` (beats) are set for pitched sounds, i.e. the bass. */
 export type SoundEvent = { beat: number; sound: SoundName; gain: number; note?: number; length?: number };
 
-export type Subdivision = 1 | 2 | 4; // clicks per beat: quarter, eighth, sixteenth
+/** Clicks per beat: quarter, eighth, sixteenth (in compound meters: dotted quarter, eighths, sixteenths). */
+export type Subdivision = 1 | 2 | 4;
 /** Bass notes per beat; 0 holds one note for each chord. */
 export type BassRhythm = 0 | 1 | 2;
 
@@ -49,17 +50,18 @@ export function bassNote(chord: string): number | null {
   return BASS_LOW + ((((pc - 4) % 12) + 12) % 12);
 }
 
-const STEPS_PER_BEAT = 4;
 const ACCENT = 1;
 const HIT = 0.7;
 
 /** Basic beat for sections without a written pattern: hats on eighths, kick on 1 (and 3), snare on the off beats. */
-export function defaultDrumPattern(beatsPerBar: number): DrumPattern {
+export function defaultDrumPattern(m: Meter): DrumPattern {
+  const spb = m.stepsPerBeat;
+  const eighth = spb / m.eighthsPerBeat;
   const row = (onBeat: (beat: number) => boolean, everyEighth = false) =>
-    Array.from({ length: beatsPerBar * STEPS_PER_BEAT }, (_, i) =>
-      (everyEighth ? i % 2 === 0 : i % STEPS_PER_BEAT === 0 && onBeat(i / STEPS_PER_BEAT)) ? 'x' : '.',
+    Array.from({ length: stepsPerBar(m) }, (_, i) =>
+      (everyEighth ? i % eighth === 0 : i % spb === 0 && onBeat(i / spb)) ? 'x' : '.',
     ).join('');
-  const half = beatsPerBar % 2 === 0 ? beatsPerBar / 2 : -1;
+  const half = m.beats % 2 === 0 ? m.beats / 2 : -1;
   return {
     kick: row((b) => b === 0 || b === half),
     snare: row((b) => b % 2 === 1),
@@ -82,11 +84,12 @@ const PRESETS: DrumPreset[] = [
 ];
 
 /** Presets that fit this time signature, plus the automatic basic beat and an empty bar. */
-export function drumPresets(beatsPerBar: number): DrumPreset[] {
-  const steps = beatsPerBar * STEPS_PER_BEAT;
-  const fitting = PRESETS.filter((p) => Object.values(p.pattern).every((row) => row.length === steps));
+export function drumPresets(m: Meter): DrumPreset[] {
+  const steps = stepsPerBar(m);
+  // The presets are in sixteenths; a 12/8 bar has as many steps as a 3/4 one but they are eighths.
+  const fitting = m.compound ? [] : PRESETS.filter((p) => Object.values(p.pattern).every((row) => row.length === steps));
   return [
-    ...(fitting.length ? fitting : [{ name: '基本', pattern: defaultDrumPattern(beatsPerBar) }]),
+    ...(fitting.length ? fitting : [{ name: '基本', pattern: defaultDrumPattern(m) }]),
     { name: '清空', pattern: { kick: '.'.repeat(steps), snare: '.'.repeat(steps), hat: '.'.repeat(steps) } },
   ];
 }
@@ -94,7 +97,7 @@ export function drumPresets(beatsPerBar: number): DrumPreset[] {
 /** The drum machine pattern for a section: the drums part's pattern if it is written as steps, else the default. */
 export function drumPatternFor(c: CompiledSong, sectionId: string): DrumPattern {
   const pattern = partDetail(c.song, 'drums', sectionId)?.pattern;
-  return typeof pattern === 'object' ? pattern : defaultDrumPattern(c.beatsPerBar);
+  return typeof pattern === 'object' ? pattern : defaultDrumPattern(c.meter);
 }
 
 /** All events with `from <= beat < to`, sorted by beat. Count-in clicks sit on beats -beatsPerBar..-1. */
@@ -112,43 +115,25 @@ export function soundEvents(c: CompiledSong, from: number, to: number, opts: Sou
   const songTo = Math.min(to, c.totalBeats);
   if (songFrom >= songTo) return sortEvents(events);
 
-  if (opts.metronome) {
-    const s = opts.subdivision;
-    // Integer step counters keep beats exact instead of accumulating float error.
-    for (let i = Math.ceil(songFrom * s); i < songTo * s; i++) {
-      const beat = i / s;
-      const onBeat = i % s === 0;
-      const downbeat = onBeat && (i / s) % bpb === 0;
-      events.push({ beat, sound: downbeat ? 'clickAccent' : 'click', gain: onBeat ? ACCENT : 0.35 });
+  for (let b = barIndexAt(c, songFrom); b < c.bars.length && c.bars[b].startBeat < songTo; b++) {
+    const bar = c.bars[b];
+    // Integer step counters from each bar's start keep beats exact instead of accumulating float error.
+    const steps = (perBeat: number, each: (i: number, beat: number) => void) => {
+      const first = Math.max(0, Math.ceil((songFrom - bar.startBeat) * perBeat - 1e-9));
+      for (let i = first; i < bar.beats * perBeat; i++) {
+        const beat = bar.startBeat + i / perBeat;
+        if (beat >= songTo) break;
+        each(i, beat);
+      }
+    };
+    if (opts.metronome) {
+      const s = clicksPerBeat(bar.meter, opts.subdivision);
+      steps(s, (i, beat) => {
+        const onBeat = i % s === 0;
+        events.push({ beat, sound: i === 0 ? 'clickAccent' : 'click', gain: onBeat ? ACCENT : 0.35 });
+      });
     }
-  }
-
-  if (opts.drums) {
-    const stepsPerBar = bpb * STEPS_PER_BEAT;
-    for (let i = Math.ceil(songFrom * STEPS_PER_BEAT); i < songTo * STEPS_PER_BEAT; i++) {
-      const barIndex = Math.floor(i / stepsPerBar);
-      const step = i % stepsPerBar;
-      const sectionIndex = c.bars[barIndex].sectionIndex;
-      const section = c.sections[sectionIndex];
-      const beat = i / STEPS_PER_BEAT;
-      const lastBarBeforeNext =
-        opts.fills && barIndex === section.startBar + section.barCount - 1 && sectionIndex < c.sections.length - 1;
-      const firstBarAfterFill = opts.fills && barIndex === section.startBar && sectionIndex > 0;
-
-      if (lastBarBeforeNext && bpb >= 2 && step >= stepsPerBar - 2 * STEPS_PER_BEAT) {
-        fillStep(events, beat, step - (stepsPerBar - 2 * STEPS_PER_BEAT));
-        continue;
-      }
-      if (firstBarAfterFill && step === 0) {
-        events.push({ beat, sound: 'crash', gain: ACCENT }, { beat, sound: 'kick', gain: ACCENT });
-        continue;
-      }
-      const pattern = drumPatternFor(c, section.id);
-      for (const [drum, row] of Object.entries(pattern) as [Drum, string][]) {
-        const hit = row[step];
-        if (hit === 'x' || hit === 'X') events.push({ beat, sound: drum, gain: hit === 'X' ? ACCENT : HIT });
-      }
-    }
+    if (opts.drums) steps(bar.meter.stepsPerBeat, (step, beat) => drumStep(events, c, b, step, beat, opts.fills));
   }
 
   if (opts.bass) bassEvents(events, c, songFrom, songTo, opts.bassRhythm);
@@ -156,18 +141,43 @@ export function soundEvents(c: CompiledSong, from: number, to: number, opts: Sou
   return sortEvents(events);
 }
 
+/** Compound beats split in threes: "eighths" are the beat's three eighth notes, "sixteenths" six. */
+const clicksPerBeat = (m: Meter, s: Subdivision) => (m.compound && s > 1 ? (s / 2) * 3 : s);
+
+function drumStep(events: SoundEvent[], c: CompiledSong, barIndex: number, step: number, beat: number, fills: boolean) {
+  const bar = c.bars[barIndex];
+  const spb = bar.meter.stepsPerBeat;
+  const section = c.sections[bar.sectionIndex];
+  const lastBarBeforeNext =
+    fills && barIndex === section.startBar + section.barCount - 1 && bar.sectionIndex < c.sections.length - 1;
+  const firstBarAfterFill = fills && barIndex === section.startBar && bar.sectionIndex > 0;
+  const fillFrom = (bar.beats - 2) * spb;
+
+  if (lastBarBeforeNext && bar.beats >= 2 && step >= fillFrom) return fillStep(events, beat, step - fillFrom, spb);
+  if (firstBarAfterFill && step === 0) {
+    events.push({ beat, sound: 'crash', gain: ACCENT }, { beat, sound: 'kick', gain: ACCENT });
+    return;
+  }
+  // A bar shorter than the pattern (a 2/4 bar in 4/4) plays its start; a longer one starts it over.
+  const pattern = drumPatternFor(c, section.id);
+  for (const [drum, row] of Object.entries(pattern) as [Drum, string][]) {
+    const hit = row[step % row.length];
+    if (hit === 'x' || hit === 'X') events.push({ beat, sound: drum, gain: hit === 'X' ? ACCENT : HIT });
+  }
+}
+
 /** Root notes for each chord slot of the bars in the window: one held note per chord, or repeated per beat/eighth. */
 function bassEvents(events: SoundEvent[], c: CompiledSong, from: number, to: number, rhythm: BassRhythm) {
-  const bpb = c.beatsPerBar;
-  for (let b = Math.floor(from / bpb); b < c.bars.length && b * bpb < to; b++) {
+  for (let b = barIndexAt(c, from); b < c.bars.length && c.bars[b].startBeat < to; b++) {
     const bar = c.bars[b];
-    const slot = bpb / bar.chords.length;
+    const slot = bar.beats / bar.chords.length;
+    // In compound meters the eighths come three to a beat.
+    const step = rhythm === 0 ? slot : 1 / (rhythm === 2 ? bar.meter.eighthsPerBeat : 1);
     bar.chords.forEach((chord, i) => {
       const note = bassNote(chord);
       if (note === null) return;
       const start = bar.startBeat + i * slot;
       const end = start + slot;
-      const step = rhythm === 0 ? slot : 1 / rhythm;
       // Integer step counters keep beats exact, as for the metronome.
       for (let k = 0; start + k * step < end - 1e-9; k++) {
         const beat = start + k * step;
@@ -178,13 +188,17 @@ function bassEvents(events: SoundEvent[], c: CompiledSong, from: number, to: num
   }
 }
 
-/** Two-beat fill: toms on eighths, then a sixteenth-note snare build. `step` counts sixteenths from 0 to 7. */
-function fillStep(events: SoundEvent[], beat: number, step: number) {
-  if (step < STEPS_PER_BEAT) {
-    if (step % 2 === 0) events.push({ beat, sound: 'tom', gain: HIT });
+/**
+ * Two-beat fill: toms on eighths, then a snare build on every step. `step` counts drum steps from the
+ * start of the fill (0..7 in simple meters, 0..5 in compound ones).
+ */
+function fillStep(events: SoundEvent[], beat: number, step: number, stepsPerBeat: number) {
+  const eighth = stepsPerBeat === 3 ? 1 : 2;
+  if (step < stepsPerBeat) {
+    if (step % eighth === 0) events.push({ beat, sound: 'tom', gain: HIT });
     if (step === 0) events.push({ beat, sound: 'kick', gain: HIT });
   } else {
-    events.push({ beat, sound: 'snare', gain: 0.45 + 0.15 * (step - STEPS_PER_BEAT) });
+    events.push({ beat, sound: 'snare', gain: 0.45 + (0.6 * (step - stepsPerBeat)) / stepsPerBeat });
   }
 }
 

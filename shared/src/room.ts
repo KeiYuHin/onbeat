@@ -1,7 +1,7 @@
 // One rehearsal room, independent of transport: the Node `ws` server and a Durable Object both drive it.
 import type { ClientMsg, Command, ErrorCode, Member, Part, PlaybackState, RoomEdits, ServerMsg } from './protocol';
 import { SaveConflictError, type SaveMeta } from './library';
-import { checkDrumPattern, compileSong, type DrumEdits, type Song } from './song';
+import { barlines, checkDrumPattern, compileSong, meter, stepsPerBar, type DrumEdits, type Song } from './song';
 import { loadSong, repeatSection, resumeBeat, seekTo, setBpm, setLoop, startPlayback, stopPlayback } from './timeline';
 
 /** What a room needs from whoever runs it. */
@@ -59,12 +59,12 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
   function applyCommand(cmd: PlaybackCommand): PlaybackState | ErrorCode {
     const t = host.now();
     const compiled = compileSong(song(state.songId)!, state.extraPasses);
-    const bpb = compiled.beatsPerBar;
+    const grid = barlines(compiled);
     switch (cmd.action) {
       case 'start': {
         // Picks up where it stopped (or where a seek put it), after a count-in.
         const parked = stopPlayback(state, t);
-        return startPlayback(parked, t, { startBeat: resumeBeat(parked, compiled), beatsPerBar: bpb });
+        return startPlayback(parked, t, { startBeat: resumeBeat(parked, compiled), beatsPerBar: compiled.beatsPerBar });
       }
       case 'stop':
         return stopPlayback(state, t);
@@ -79,15 +79,15 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
       case 'seek': {
         const section = compiled.sections[cmd.sectionIndex];
         if (!section || cmd.bar >= section.barCount) return 'bad-position';
-        return seekTo(state, t, section.startBeat + cmd.bar * bpb, bpb);
+        return seekTo(state, t, compiled.bars[section.startBar + cmd.bar].startBeat, grid);
       }
       case 'setBpm':
-        return setBpm(state, t, cmd.bpm, bpb);
+        return setBpm(state, t, cmd.bpm, grid);
       case 'setLoop': {
-        if (cmd.sectionIndex === null) return setLoop(state, t, null, bpb);
+        if (cmd.sectionIndex === null) return setLoop(state, t, null, grid);
         const section = compiled.sections[cmd.sectionIndex];
         if (!section) return 'bad-position';
-        return setLoop(state, t, { startBeat: section.startBeat, endBeat: section.startBeat + section.barCount * bpb }, bpb);
+        return setLoop(state, t, { startBeat: section.startBeat, endBeat: section.endBeat }, grid);
       }
     }
   }
@@ -95,7 +95,7 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
   function setDrums(cmd: Extract<Command, { action: 'setDrums' | 'setDrumsAll' }>): ErrorCode | null {
     const current = song(state.songId)!;
     const pattern = cmd.pattern;
-    if (pattern && pattern !== 'default' && checkDrumPattern(pattern, current.timeSignature[0] * 4)) return 'bad-pattern';
+    if (pattern && pattern !== 'default' && checkDrumPattern(pattern, stepsPerBar(meter(current.timeSignature)))) return 'bad-pattern';
     let drums: DrumEdits;
     if (cmd.action === 'setDrumsAll') {
       // Sections with a pattern of their own in the song are told to follow the new default instead.

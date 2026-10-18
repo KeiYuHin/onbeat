@@ -1,5 +1,5 @@
 import type { Jump, PlaybackState } from './protocol';
-import type { CompiledSong } from './song';
+import { barIndexAt, type CompiledSong } from './song';
 
 /** Lead time before the count-in starts, so the start command reaches every device first. */
 export const START_LEAD_MS = 1500;
@@ -11,6 +11,15 @@ export const CHANGE_LEAD_MS = 300;
 export const DEFAULT_BEATS_PER_BAR = 4;
 
 export const msPerBeat = (bpm: number) => 60000 / bpm;
+
+/** The first barline at or after `beat`. A song's come from `barlines(compiled)`, since bars can differ in length. */
+export type Barlines = (beat: number) => number;
+
+/** Barlines every `n` beats from beat 0. */
+export const everyBeats =
+  (n: number): Barlines =>
+  (beat) =>
+    Math.ceil(beat / n - 1e-9) * n + 0; // + 0 turns -0 into 0
 
 type Loop = NonNullable<PlaybackState['loop']>;
 
@@ -121,10 +130,10 @@ export function startPlayback(
 }
 
 /** Where 开始 picks up from a stopped state: the start of the bar it stopped in, or the top once the song is over. */
-export function resumeBeat(state: PlaybackState, compiled: Pick<CompiledSong, 'beatsPerBar' | 'totalBeats'>): number {
+export function resumeBeat(state: PlaybackState, compiled: Pick<CompiledSong, 'bars' | 'totalBeats'>): number {
   const b = state.anchorBeat;
   if (b < 0 || b >= compiled.totalBeats) return 0;
-  return Math.floor(b / compiled.beatsPerBar) * compiled.beatsPerBar;
+  return compiled.bars[barIndexAt(compiled, b)].startBeat;
 }
 
 /**
@@ -152,41 +161,43 @@ function change(
   state: PlaybackState,
   serverNow: number,
   { beat, bpm }: { beat?: number; bpm?: number },
-  beatsPerBar: number,
+  barlines: Barlines,
   leadMs = CHANGE_LEAD_MS,
 ): PlaybackState {
   const s = settle(state, serverNow);
   if (!s.playing) return { ...s, anchorServerTime: serverNow, anchorBeat: beat ?? s.anchorBeat, bpm: bpm ?? s.bpm };
   const patch = { ...(beat !== undefined && { beat }), ...(bpm !== undefined && { bpm }) };
   if (s.jump) return { ...s, jump: { ...s.jump, ...patch } };
-  // Runs start on barlines (or keep their bar phase when re-anchored), so barlines are multiples of beatsPerBar.
+  // Find the barline from the (looped) position, then count beats from the anchor so the time comes out exact.
+  // Loop ends are barlines, so the barline is never past the wrap.
   const mpb = msPerBeat(s.bpm);
   const raw = s.anchorBeat + (serverNow + leadMs - s.anchorServerTime) / mpb;
-  const barline = Math.ceil(raw / beatsPerBar - 1e-9) * beatsPerBar;
+  const at = beatAt(s, serverNow + leadMs);
+  const barline = barlines(at) + (raw - at);
   return { ...s, jump: { atServerTime: s.anchorServerTime + (barline - s.anchorBeat) * mpb, bpm: s.bpm, ...patch } };
 }
 
 /** Go to `beat` (a barline). Leaving the looped range ends the loop. */
-export function seekTo(state: PlaybackState, serverNow: number, beat: number, beatsPerBar: number): PlaybackState {
+export function seekTo(state: PlaybackState, serverNow: number, beat: number, barlines: Barlines): PlaybackState {
   const { loop } = state;
   const outside = loop && (beat < loop.startBeat || beat >= loop.endBeat);
-  return change(outside ? setLoop(state, serverNow, null, beatsPerBar) : state, serverNow, { beat }, beatsPerBar);
+  return change(outside ? setLoop(state, serverNow, null, barlines) : state, serverNow, { beat }, barlines);
 }
 
-export function setBpm(state: PlaybackState, serverNow: number, bpm: number, beatsPerBar: number): PlaybackState {
-  return change(state, serverNow, { bpm }, beatsPerBar);
+export function setBpm(state: PlaybackState, serverNow: number, bpm: number, barlines: Barlines): PlaybackState {
+  return change(state, serverNow, { bpm }, barlines);
 }
 
 /**
  * Loops `loop` (barlines), going to its start if the position isn't already inside it; null stops looping
  * and carries on from wherever the position is.
  */
-export function setLoop(state: PlaybackState, serverNow: number, loop: Loop | null, beatsPerBar: number): PlaybackState {
+export function setLoop(state: PlaybackState, serverNow: number, loop: Loop | null, barlines: Barlines): PlaybackState {
   const { loop: _, ...s } = reanchor(state, serverNow);
   if (!loop) return s;
   const target = (s.playing ? s.jump?.beat : undefined) ?? s.anchorBeat;
   const inside = target >= loop.startBeat && target < loop.endBeat;
-  return inside ? { ...s, loop } : change({ ...s, loop }, serverNow, { beat: loop.startBeat }, beatsPerBar);
+  return inside ? { ...s, loop } : change({ ...s, loop }, serverNow, { beat: loop.startBeat }, barlines);
 }
 
 /**
@@ -207,8 +218,7 @@ export function repeatSection(
 ): PlaybackState | null {
   const section = compiled.sections[sectionIndex];
   if (!section) return null;
-  const end = section.startBeat + section.barCount * compiled.beatsPerBar;
-  if (beatAt(state, serverNow) >= end - REPEAT_MARGIN_BEATS) return null;
+  if (beatAt(state, serverNow) >= section.endBeat - REPEAT_MARGIN_BEATS) return null;
   const extra = { ...state.extraPasses };
   extra[sectionIndex] = (extra[sectionIndex] ?? 0) + 1;
   return { ...state, extraPasses: extra };

@@ -13,6 +13,7 @@ import {
   type CompiledSong,
   type Drum,
   type DrumPattern,
+  type Meter,
   type Part,
   type PartDetail,
   type PlaybackState,
@@ -66,7 +67,9 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   const live = playback.playing && !!pos;
   // Stopped inside the song: 开始 picks up from this bar.
   const parked = !playback.playing && !!pos && beat > 0;
-  const { beatInBar, phase } = barPosition(beat, beatsPerBar);
+  // The bar being played, or the count-in bar before the song.
+  const bar = pos && compiled.bars[pos.barIndex];
+  const { beatInBar, phase } = bar ? { beatInBar: pos.beatInBar, phase: beat - Math.floor(beat) } : barPosition(beat, beatsPerBar);
   const ticking = playback.playing && !waiting && !ended;
   const beatFlash = flash && ticking && phase < 0.12;
   const detail = shown && partDetail(song, part, shown.section.id);
@@ -83,7 +86,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   // A seek waiting for the barline; during the count-in the target is already in `where`.
   const jumpNotice = !countIn && targetBar && `下一小节 → ${targetBar}`;
   // The seek lands at the end of this bar: the current card previews where it goes.
-  const barLeft = beatsPerBar - (beat - Math.floor(beat / beatsPerBar) * beatsPerBar);
+  const barLeft = bar ? bar.startBeat + bar.beats - beat : 0;
   const jumpTo =
     live && target && pending && (pending.atServerTime - now) / msPerBeat(bpm) <= barLeft + 1e-3
       ? { chord: target.chord, label: target.section.label }
@@ -101,7 +104,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
         </span>
         <span className={`where${countIn && !waiting ? ' count-in' : ''}`}>{where}</span>
         {jumpNotice && <span className="pending">{jumpNotice}</span>}
-        <Dots count={beatsPerBar} current={ticking ? beatInBar : 0} flash={ticking && phase < 0.15} />
+        <Dots count={bar?.beats ?? beatsPerBar} current={ticking ? beatInBar : 0} flash={ticking && phase < 0.15} />
       </div>
 
       <div className={`chord-panel${beatFlash ? (beatInBar === 1 ? ' flash accent' : ' flash') : ''}`}>
@@ -125,7 +128,12 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
       <div className="part-panel">
         <div className="part-label">{spec?.label ?? part}</div>
         {detail ? (
-          <PartDetails detail={detail} beatInSection={live && shown ? beat - shown.section.startBeat : null} />
+          <PartDetails
+            detail={detail}
+            meter={bar?.meter ?? compiled.meter}
+            beatInSection={live && shown ? beat - shown.section.startBeat : null}
+            beatInBar={live && bar ? beat - bar.startBeat : null}
+          />
         ) : (
           <div className="detail muted">这首歌没有写这个声部，跟和弦走</div>
         )}
@@ -141,7 +149,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
         {sections.map((s, i) => {
           const active = pos?.section === s;
           const past = !!pos && i < sections.indexOf(pos.section);
-          const progress = active ? (beat - s.startBeat) / (s.barCount * beatsPerBar) : 0;
+          const progress = active ? (beat - s.startBeat) / (s.endBeat - s.startBeat) : 0;
           const looped = loop?.startBeat === s.startBeat;
           return (
             <li key={i} className={`${active ? 'active' : past ? 'past' : ''}${looped ? ' looped' : ''}`}>
@@ -187,18 +195,17 @@ function LoopView({
   onRepeat: ((sectionIndex: number) => void) | null;
   onUnloop: () => void;
 }) {
-  const { beatsPerBar: bpb } = compiled;
   const section = shown.section;
   const sectionIndex = compiled.sections.indexOf(section);
-  const loopBeats = section.loopBars * bpb;
-  const inSection = beat - section.startBeat;
+  // Bars can differ in length, so count bars rather than beats.
+  const barInSection = shown.barInSection - 1;
   const placed = live || parked;
-  const pass = placed ? Math.floor(inSection / loopBeats) : 0;
-  const card = placed ? Math.floor(inSection / bpb) % section.loopBars : -1;
-  const inBar = inSection - Math.floor(inSection / bpb) * bpb;
+  const pass = placed ? Math.floor(barInSection / section.loopBars) : 0;
+  const card = placed ? barInSection % section.loopBars : -1;
+  const inBar = beat - compiled.bars[shown.barIndex].startBeat;
   const looped = section.times > 1;
   const lastPass = live && !looping && pass === section.times - 1;
-  const remainingBars = section.barCount - Math.floor(inSection / bpb);
+  const remainingBars = section.barCount - barInSection;
   const next = compiled.sections[sectionIndex + 1];
   const bars = compiled.bars.slice(section.startBar, section.startBar + section.loopBars);
   const cols = Math.min(bars.length, 4);
@@ -236,7 +243,7 @@ function LoopView({
       <div className="cards" style={{ '--cols': cols, '--rows': Math.ceil(bars.length / cols) } as CSSProperties}>
         {bars.map((bar, i) => {
           const current = i === card;
-          const slot = current ? Math.floor((inBar * bar.chords.length) / bpb) : -1;
+          const slot = current ? Math.floor((inBar * bar.chords.length) / bar.beats) : -1;
           const chars = bar.chords.join(' ').length;
           const splitHere = i === split.index;
           return (
@@ -253,7 +260,7 @@ function LoopView({
                   ))}
                 </div>
                 <div className="card-dots">
-                  {Array.from({ length: bpb }, (_, j) => (
+                  {Array.from({ length: bar.beats }, (_, j) => (
                     <span key={j} className={live && current && j === Math.floor(inBar) ? 'on' : ''} />
                   ))}
                 </div>
@@ -312,15 +319,26 @@ function Dots({ count, current, flash }: { count: number; current: number; flash
   );
 }
 
-function PartDetails({ detail, beatInSection }: { detail: PartDetail; beatInSection: number | null }) {
+function PartDetails({
+  detail,
+  meter,
+  beatInSection,
+  beatInBar,
+}: {
+  detail: PartDetail;
+  /** The current bar's meter. */
+  meter: Meter;
+  beatInSection: number | null;
+  beatInBar: number | null;
+}) {
   const { strum, pattern, groove } = detail;
-  const current = strum && beatInSection !== null ? strumIndex(strum, beatInSection) : -1;
+  const current = strum && beatInSection !== null ? strumIndex(strum, beatInSection, meter.eighthsPerBeat) : -1;
   return (
     <>
       {strum && (
         <div className="strum">
           {[...strum].map((c, i) => (
-            <span key={i} className={`${i === current ? 'current' : ''}${i % 2 === 0 ? ' downbeat' : ''}`}>
+            <span key={i} className={`${i === current ? 'current' : ''}${i % meter.eighthsPerBeat === 0 ? ' downbeat' : ''}`}>
               {STRUM_GLYPHS[c] ?? c}
             </span>
           ))}
@@ -328,7 +346,7 @@ function PartDetails({ detail, beatInSection }: { detail: PartDetail; beatInSect
       )}
       {typeof pattern === 'string' && <div className="detail">{pattern}</div>}
       {groove && <div className="detail">{groove}</div>}
-      {typeof pattern === 'object' && <DrumGrid pattern={pattern} beatInSection={beatInSection} />}
+      {typeof pattern === 'object' && <DrumGrid pattern={pattern} meter={meter} beatInBar={beatInBar} />}
     </>
   );
 }
@@ -342,12 +360,13 @@ const DRUM_LABELS: Record<Drum, string> = {
   tom: '通鼓',
 };
 
-/** Step-sequencer view of the section's drum pattern, highlighting the current sixteenth. */
-function DrumGrid({ pattern, beatInSection }: { pattern: DrumPattern; beatInSection: number | null }) {
+/** Step-sequencer view of the section's drum pattern, highlighting the current step. */
+function DrumGrid({ pattern, meter, beatInBar }: { pattern: DrumPattern; meter: Meter; beatInBar: number | null }) {
   const rows = DRUMS.filter((d) => pattern[d]);
   const steps = pattern[rows[0]]?.length ?? 0;
-  // Sections start on a barline, so this is also the step within the current bar.
-  const current = beatInSection === null || !steps ? -1 : Math.floor(beatInSection * 4) % steps;
+  const spb = meter.stepsPerBeat;
+  // Wraps like the drum machine does in a bar longer than the pattern.
+  const current = beatInBar === null || !steps ? -1 : Math.floor(beatInBar * spb + 1e-9) % steps;
   return (
     <div className="drum-grid">
       {rows.map((d) => (
@@ -356,7 +375,7 @@ function DrumGrid({ pattern, beatInSection }: { pattern: DrumPattern; beatInSect
           {[...pattern[d]!].map((hit, i) => (
             <span
               key={i}
-              className={`step${hit === '.' ? '' : hit === 'X' ? ' hit accent' : ' hit'}${i === current ? ' current' : ''}${i % 4 === 0 ? ' beat' : ''}`}
+              className={`step${hit === '.' ? '' : hit === 'X' ? ' hit accent' : ' hit'}${i === current ? ' current' : ''}${i % spb === 0 ? ' beat' : ''}`}
             />
           ))}
         </div>

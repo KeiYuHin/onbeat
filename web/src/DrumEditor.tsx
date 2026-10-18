@@ -6,6 +6,7 @@ import {
   hasDrumEdits,
   partDetail,
   sectionName,
+  stepsPerBar,
   type CompiledSong,
   type Drum,
   type DrumEdits,
@@ -24,8 +25,8 @@ const DRUM_LABELS: Record<Drum, string> = {
   tom: '通鼓',
 };
 const NEXT_HIT: Record<string, string> = { '.': 'x', x: 'X', X: '.' };
-/** On narrow screens a bar is split into rows of two beats, so cells stay big enough to tap. */
-const NARROW_STEPS = 8;
+/** On narrow screens a bar is split into rows of this many beats, so cells stay big enough to tap. */
+const NARROW_BEATS = 2;
 const WIDE_QUERY = '(min-width: 700px)';
 
 function useWide() {
@@ -57,10 +58,11 @@ type Props = {
  * unless it has a pattern of its own. Every change syncs to the room.
  */
 export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll, onSave, part }: Props) {
-  const { song, beatsPerBar } = compiled;
+  const { song, meter } = compiled;
+  const spb = meter.stepsPerBeat;
   const [device, setDevice] = useDeviceName(part);
-  const steps = beatsPerBar * 4;
-  const chunkSteps = useWide() ? steps : NARROW_STEPS;
+  const steps = stepsPerBar(meter);
+  const chunkSteps = useWide() ? steps : NARROW_BEATS * spb;
   const sectionIds = [...new Set(song.form)];
   const [target, setTarget] = useState<string | null>(initialSectionId);
 
@@ -68,7 +70,7 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
     const p = id === null ? song.parts.drums?.default.pattern : song.parts.drums?.sections?.[id]?.pattern;
     return p && typeof p === 'object' ? p : null;
   };
-  const songDefault = own(null) ?? defaultDrumPattern(beatsPerBar);
+  const songDefault = own(null) ?? defaultDrumPattern(meter);
   const pattern = (target !== null && own(target)) || songDefault;
   const edited = target === null ? !!edits.default : !!edits.sections?.[target];
   const withOwn = sectionIds.filter((id) => own(id));
@@ -108,7 +110,7 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
       )}
 
       <div className="presets">
-        {drumPresets(beatsPerBar).map((p) => (
+        {drumPresets(meter).map((p) => (
           <button key={p.name} onClick={() => onSet(target, p.pattern)}>
             {p.name}
           </button>
@@ -124,8 +126,8 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
               <div className="drum-row beats">
                 <span className="drum-name" />
                 {Array.from({ length: count }, (_, i) => (
-                  <span key={i} className={`beat-number${(first + i) % 4 === 0 ? ' beat' : ''}`}>
-                    {(first + i) % 4 === 0 ? (first + i) / 4 + 1 : ''}
+                  <span key={i} className={`beat-number${(first + i) % spb === 0 ? ' beat' : ''}`}>
+                    {(first + i) % spb === 0 ? (first + i) / spb + 1 : ''}
                   </span>
                 ))}
               </div>
@@ -139,7 +141,7 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
                       <button
                         key={step}
                         aria-label={`${DRUM_LABELS[drum]} 第 ${step + 1} 步`}
-                        className={`cell${hit === 'X' ? ' hit accent' : hit === 'x' ? ' hit' : ''}${step % 4 === 0 ? ' beat' : ''}`}
+                        className={`cell${hit === 'X' ? ' hit accent' : hit === 'x' ? ' hit' : ''}${step % spb === 0 ? ' beat' : ''}`}
                         onClick={() => toggle(drum, step)}
                       />
                     );

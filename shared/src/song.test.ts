@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
 import {
   applyDrumEdits,
+  barIndexAt,
+  barlines,
+  meter,
   checkDrumPattern,
   compileSong,
   parseSong,
   partDetail,
-  repeatPeriod,
+  repeatPeriod as findPeriod,
   songPosition,
   strumIndex,
   type Song,
@@ -14,7 +17,7 @@ import {
 
 const example = parseSong(exampleJson);
 
-const waltz: Song = {
+const waltz = parseSong({
   id: 'waltz',
   title: 'test',
   bpm: 90,
@@ -25,7 +28,7 @@ const waltz: Song = {
   },
   form: ['a', 'b', 'a'],
   parts: {},
-};
+});
 
 describe('parseSong', () => {
   it('accepts the bundled example song', () => {
@@ -62,6 +65,63 @@ describe('compileSong', () => {
     expect(c.beatsPerBar).toBe(3);
     expect(c.sections.map((s) => s.label)).toEqual(['A段 1', 'b', 'A段 2']);
     expect(c.totalBeats).toBe(7 * 3);
+  });
+});
+
+describe('meters', () => {
+  // 4/4 with a 2/4 bar in the middle, like the turnaround in Someone Like You.
+  const odd = parseSong({
+    ...example,
+    sections: { a: { bars: [['C'], { chords: ['F', 'G'], timeSignature: [2, 4] }, ['C']] } },
+    form: ['a', 'a'],
+    parts: {},
+  });
+
+  it('counts compound meters in dotted quarters', () => {
+    expect(meter([12, 8])).toEqual({ beats: 4, compound: true, eighthsPerBeat: 3, stepsPerBeat: 3 });
+    expect(meter([6, 8]).beats).toBe(2);
+    expect(meter([3, 8])).toMatchObject({ beats: 3, compound: false, eighthsPerBeat: 1 });
+    expect(meter([2, 2])).toMatchObject({ beats: 2, eighthsPerBeat: 4 });
+  });
+
+  it('lays bars out by their own length', () => {
+    const c = compileSong(odd);
+    expect(c.bars.map((b) => [b.startBeat, b.beats])).toEqual([[0, 4], [4, 2], [6, 4], [10, 4], [14, 2], [16, 4]]);
+    expect(c.sections[1]).toMatchObject({ startBeat: 10, endBeat: 20, startBar: 3 });
+    expect(c.totalBeats).toBe(20);
+  });
+
+  it('finds position, chord slots and the next change in a short bar', () => {
+    const c = compileSong(odd);
+    expect(songPosition(c, 5.5)).toMatchObject({ barIndex: 1, beatInBar: 2, chord: 'G', next: { chord: 'C', inBeats: 0.5 } });
+    expect(songPosition(c, 6)).toMatchObject({ barIndex: 2, barInSection: 3, beatInBar: 1, chord: 'C' });
+    expect(barIndexAt(c, 19.99)).toBe(5);
+  });
+
+  it('puts barlines where the bars are, and past the end in the last bar length', () => {
+    const at = barlines(compileSong(odd));
+    expect([0, 0.5, 4, 4.1, 5.9, 6, 19, 20, 21].map(at)).toEqual([0, 4, 4, 6, 6, 6, 20, 20, 24]);
+    expect(at(-3)).toBe(0);
+    expect(at(-4.5)).toBe(-4);
+  });
+
+  it('only folds identical bars into a loop', () => {
+    const two = { chords: ['C'], timeSignature: [2, 4] as [number, number] };
+    expect(findPeriod([{ chords: ['C'] }, two, { chords: ['C'] }, two])).toBe(2);
+    expect(findPeriod([{ chords: ['C'] }, { chords: ['C'] }, { chords: ['C'] }, two])).toBe(4);
+  });
+
+  it('checks drum patterns against compound bars', () => {
+    const slow = { ...example, timeSignature: [12, 8], parts: { drums: { label: '鼓', default: { pattern: { kick: 'x'.repeat(16) } } } } };
+    expect(() => parseSong(slow)).toThrow(/12 steps/);
+  });
+
+  it.each([
+    [{ timeSignature: [4, 3] }, /timeSignature/],
+    [{ sections: { a: { bars: [{ chords: ['C'], timeSignature: [0, 4] }] } }, form: ['a'], parts: {} }, /bar 1 timeSignature/],
+    [{ sections: { a: { bars: [{ timeSignature: [2, 4] }] } }, form: ['a'], parts: {} }, /bar 1 needs/],
+  ])('rejects %j', (patch, error) => {
+    expect(() => parseSong({ ...example, ...patch })).toThrow(error);
   });
 });
 
@@ -131,7 +191,7 @@ describe('loops', () => {
     const raw = { ...example, sections: { ...example.sections, verse: { loop: [['C'], ['G']], times: 3 } } };
     const before = JSON.stringify(raw);
     const song = parseSong(raw);
-    expect(song.sections.verse.bars).toEqual([['C'], ['G'], ['C'], ['G'], ['C'], ['G']]);
+    expect(song.sections.verse.bars.map((b) => b.chords)).toEqual([['C'], ['G'], ['C'], ['G'], ['C'], ['G']]);
     expect(JSON.stringify(raw)).toBe(before);
   });
 
@@ -140,6 +200,7 @@ describe('loops', () => {
   });
 
   it('detects the smallest repeating period', () => {
+    const repeatPeriod = (bars: string[][]) => findPeriod(bars.map((chords) => ({ chords })));
     expect(repeatPeriod([['C'], ['Am'], ['F'], ['G'], ['C'], ['Am'], ['F'], ['G']])).toBe(4);
     expect(repeatPeriod([['C'], ['C'], ['C']])).toBe(1);
     expect(repeatPeriod([['C', 'G'], ['C']])).toBe(2);

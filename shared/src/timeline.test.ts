@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
-import { compileSong, parseSong } from './song';
+import { barlines, compileSong, parseSong } from './song';
 import {
   barPosition,
+  everyBeats,
   beatAt,
   bpmAt,
   loadSong,
@@ -17,6 +18,7 @@ import {
   stopPlayback,
 } from './timeline';
 
+const bars4 = everyBeats(4);
 const idle = (bpm = 120) => loadSong({ id: 'test', bpm });
 
 describe('beatAt', () => {
@@ -114,10 +116,10 @@ describe('start from a bar', () => {
   });
 
   it('resumes from the start of the bar it stopped in, or the top once over', () => {
-    const c = { beatsPerBar: 4, totalBeats: 32 };
+    const c = compileSong(parseSong({ ...exampleJson, form: ['intro', 'verse'] })); // 12 bars of 4
     expect(resumeBeat({ ...idle(), anchorBeat: 13.7 }, c)).toBe(12);
     expect(resumeBeat({ ...idle(), anchorBeat: -2 }, c)).toBe(0);
-    expect(resumeBeat({ ...idle(), anchorBeat: 32 }, c)).toBe(0);
+    expect(resumeBeat({ ...idle(), anchorBeat: 48 }, c)).toBe(0);
   });
 
   it('stopping during the count-in parks at the bar it was counting into', () => {
@@ -133,7 +135,7 @@ describe('seekTo', () => {
   it('jumps at the next barline that is far enough away, continuous until then', () => {
     const s = playingAt();
     const t = 5 * 500; // beat 5, bar 2; next barline beat 8 at t=4000
-    const next = seekTo(s, t, 24, 4);
+    const next = seekTo(s, t, 24, bars4);
     expect(next.jump).toEqual({ atServerTime: 4000, beat: 24, bpm: 120 });
     for (const at of [t, 3000, 3999]) expect(beatAt(next, at)).toBeCloseTo(beatAt(s, at), 9);
     expect(beatAt(next, 4000)).toBe(24);
@@ -142,31 +144,31 @@ describe('seekTo', () => {
 
   it('skips a barline that is too close', () => {
     const t = 7.8 * 500; // 100ms before beat 8
-    expect(seekTo(playingAt(), t, 0, 4).jump!.atServerTime).toBe(12 * 500);
+    expect(seekTo(playingAt(), t, 0, bars4).jump!.atServerTime).toBe(12 * 500);
   });
 
   it('moves straight there while stopped', () => {
-    const s = seekTo({ ...idle(), anchorBeat: 3.5 }, 0, 20, 4);
+    const s = seekTo({ ...idle(), anchorBeat: 3.5 }, 0, 20, bars4);
     expect(s.playing).toBe(false);
     expect(s.anchorBeat).toBe(20);
   });
 
   it('changes where a count-in leads', () => {
-    const s = seekTo(startPlayback(idle(), 0), 100, 32, 4);
+    const s = seekTo(startPlayback(idle(), 0), 100, 32, bars4);
     expect(beatAt(s, START_LEAD_MS + 2000)).toBe(32);
   });
 
   it('ends a loop when going outside it, keeps it when going inside', () => {
-    const looped = setLoop(playingAt(), 0, { startBeat: 0, endBeat: 16 }, 4);
-    expect(seekTo(looped, 1000, 8, 4).loop).toEqual({ startBeat: 0, endBeat: 16 });
-    expect(seekTo(looped, 1000, 16, 4).loop).toBeUndefined();
+    const looped = setLoop(playingAt(), 0, { startBeat: 0, endBeat: 16 }, bars4);
+    expect(seekTo(looped, 1000, 8, bars4).loop).toEqual({ startBeat: 0, endBeat: 16 });
+    expect(seekTo(looped, 1000, 16, bars4).loop).toBeUndefined();
   });
 });
 
 describe('setBpm', () => {
   it('changes tempo at the next barline without moving the position', () => {
     const s = playingAt(120);
-    const next = setBpm(s, 1000, 60, 4); // beat 2; barline beat 4 at t=2000
+    const next = setBpm(s, 1000, 60, bars4); // beat 2; barline beat 4 at t=2000
     expect(beatAt(next, 1999)).toBeCloseTo(beatAt(s, 1999), 9);
     expect(bpmAt(next, 1999)).toBe(120);
     expect(beatAt(next, 2000)).toBeCloseTo(4, 9);
@@ -175,21 +177,21 @@ describe('setBpm', () => {
   });
 
   it('rides along with a pending seek, and both survive later commands', () => {
-    const s = setBpm(seekTo(playingAt(), 1000, 16, 4), 1100, 90, 4);
+    const s = setBpm(seekTo(playingAt(), 1000, 16, bars4), 1100, 90, bars4);
     expect(s.jump).toEqual({ atServerTime: 2000, beat: 16, bpm: 90 });
     // After the jump has happened, the next change folds it in first.
-    const later = setBpm(s, 2500, 100, 4);
+    const later = setBpm(s, 2500, 100, bars4);
     expect(later.jump!.beat).toBeUndefined();
     expect(beatAt(later, 2500)).toBeCloseTo(beatAt(s, 2500), 9);
     expect(bpmAt(later, 2500)).toBe(90);
   });
 
   it('applies right away while stopped', () => {
-    expect(setBpm(idle(120), 0, 80, 4)).toMatchObject({ bpm: 80, anchorBeat: 0 });
+    expect(setBpm(idle(120), 0, 80, bars4)).toMatchObject({ bpm: 80, anchorBeat: 0 });
   });
 
   it('keeps a pending tempo when stopped before the barline', () => {
-    expect(stopPlayback(setBpm(playingAt(), 1000, 80, 4), 1500).bpm).toBe(80);
+    expect(stopPlayback(setBpm(playingAt(), 1000, 80, bars4), 1500).bpm).toBe(80);
   });
 });
 
@@ -197,39 +199,73 @@ describe('setLoop', () => {
   const loop = { startBeat: 8, endBeat: 16 };
 
   it('wraps from the end back to the start', () => {
-    const s = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, loop, 4);
+    const s = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, loop, bars4);
     expect(beatAt(s, 7.5 * 500)).toBeCloseTo(15.5, 9);
     expect(beatAt(s, 8 * 500)).toBe(8);
     expect(beatAt(s, 17 * 500)).toBe(9);
   });
 
   it('plays on into a loop ahead, but jumps into it when asked from outside', () => {
-    const inside = setLoop(playingAt(), 5 * 500, { startBeat: 0, endBeat: 16 }, 4);
+    const inside = setLoop(playingAt(), 5 * 500, { startBeat: 0, endBeat: 16 }, bars4);
     expect(inside.jump).toBeUndefined();
-    const outside = setLoop(playingAt(), 2 * 500, loop, 4);
+    const outside = setLoop(playingAt(), 2 * 500, loop, bars4);
     expect(outside.jump).toMatchObject({ beat: 8 });
     expect(beatAt(outside, 4 * 500)).toBe(8);
     expect(beatAt(outside, 12 * 500)).toBe(8); // came round once
   });
 
   it('carries on from the current position when cleared', () => {
-    const s = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, loop, 4);
+    const s = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, loop, bars4);
     const t = 10 * 500; // looped once, at beat 10
-    const cleared = setLoop(s, t, null, 4);
+    const cleared = setLoop(s, t, null, bars4);
     expect(cleared.loop).toBeUndefined();
     expect(beatAt(cleared, t)).toBeCloseTo(10, 9);
     expect(beatAt(cleared, t + 4000)).toBeCloseTo(18, 9);
   });
 
   it('moves a stopped position into the loop', () => {
-    expect(setLoop(idle(), 0, loop, 4).anchorBeat).toBe(8);
+    expect(setLoop(idle(), 0, loop, bars4).anchorBeat).toBe(8);
+  });
+});
+
+describe('bars of different lengths', () => {
+  // 4/4, then a 2/4 bar, then 4/4: barlines at 0, 4, 6, 10, …
+  const odd = compileSong(
+    parseSong({
+      ...exampleJson,
+      sections: { a: { bars: [['C'], { chords: ['G'], timeSignature: [2, 4] }, ['C'], ['C']] } },
+      form: ['a'],
+      parts: {},
+    }),
+  );
+  const grid = barlines(odd);
+
+  it('waits for the end of a short bar', () => {
+    const t = 4.2 * 500; // in the 2/4 bar; barline at beat 6 (t=3000)
+    const next = seekTo(playingAt(), t, 0, grid);
+    expect(next.jump).toEqual({ atServerTime: 3000, beat: 0, bpm: 120 });
+    expect(setBpm(playingAt(), 5.9 * 500, 60, grid).jump!.atServerTime).toBe(10 * 500);
+  });
+
+  it('finds barlines inside a loop after it has wrapped', () => {
+    const looped = setLoop(playingAt(), 0, { startBeat: 0, endBeat: 6 }, grid);
+    const t = 10.5 * 500; // wrapped once: beat 4.5, in the 2/4 bar
+    const next = setBpm(looped, t, 60, grid);
+    expect(beatAt(next, t)).toBeCloseTo(4.5, 9);
+    expect(next.jump!.atServerTime).toBe(12 * 500); // loop end, i.e. back at beat 0
+    expect(beatAt(next, 12 * 500)).toBeCloseTo(0, 9);
+  });
+
+  it('resumes from the start of a short bar', () => {
+    expect(resumeBeat({ ...idle(), anchorBeat: 5.5 }, odd)).toBe(4);
+    expect(resumeBeat({ ...idle(), anchorBeat: 6 }, odd)).toBe(6);
   });
 });
 
 describe('segments', () => {
   it('splits at the jump and at loop wraps, each piece agreeing with beatAt', () => {
-    const looped = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, { startBeat: 8, endBeat: 16 }, 4);
-    const s = setBpm(looped, 1000, 60, 4); // tempo halves at beat 12 (t=2000)
+    const looped = setLoop({ ...playingAt(), anchorBeat: 8 }, 0, { startBeat: 8, endBeat: 16 }, bars4);
+    const s = setBpm(looped, 1000, 60, bars4); // tempo halves at beat 12 (t=2000)
     const segs = segments(s, 500, 9000);
     expect(segs.map((g) => [g.from, g.beat, g.bpm])).toEqual([
       [500, 9, 120],
