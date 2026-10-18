@@ -5,6 +5,7 @@ import {
   compileSong,
   PART_LABELS,
   PARTS,
+  resumeBeat,
   songPosition,
   type ErrorCode,
   type Part,
@@ -13,6 +14,7 @@ import { AudioEngine } from './audio/engine';
 import { useSoundSettings } from './audio/settings';
 import { RoomConnection, type RoomTarget } from './connection';
 import { DrumEditor } from './DrumEditor';
+import { RehearsalPanel } from './RehearsalPanel';
 import { ScoreView } from './ScoreView';
 import { Sheet } from './Sheet';
 import { SoundPanel } from './SoundPanel';
@@ -24,6 +26,8 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   'not-in-room': '还没有进入房间',
   'song-not-found': '找不到这首歌',
   'too-late': '这一段马上结束了，来不及再绕一遍',
+  looping: '正在循环这一段，不用再绕一遍',
+  'bad-position': '没有这个段落或小节',
   'bad-pattern': '鼓谱格式不对',
   'save-failed': '保存失败（看一下服务器窗口的报错）',
 };
@@ -65,7 +69,7 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
   const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
   const [sound, setSound] = useSoundSettings();
-  const [sheet, setSheet] = useState<null | 'sound' | { drums: string | null }>(null);
+  const [sheet, setSheet] = useState<null | 'sound' | 'rehearsal' | { drums: string | null }>(null);
 
   useEffect(() => {
     if (snap.room && snap.memberId) onRoom(snap.room);
@@ -109,6 +113,8 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
 
   const playing = snap.playback?.playing ?? false;
   const ready = snap.status === 'open' && !!snap.memberId;
+  // Stopped somewhere past the top: 开始 would pick up from there, so offer the way back.
+  const parked = !playing && !!snap.playback && !!compiled && resumeBeat(snap.playback, compiled) > 0;
 
   return (
     <main className="room">
@@ -174,19 +180,31 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
           part={part}
           flash={sound.flash}
           onRepeat={(sectionIndex) => conn.command({ action: 'repeatSection', sectionIndex })}
+          onSeek={(sectionIndex) => conn.command({ action: 'seek', sectionIndex, bar: 0 })}
+          onLoop={(sectionIndex) => conn.command({ action: 'setLoop', sectionIndex })}
           onEditDrums={openDrumEditor}
         />
       ) : (
         <div className="score loading">加载中…</div>
       )}
 
-      <button
-        className={`transport ${playing ? 'stop' : 'start'}`}
-        disabled={!ready}
-        onClick={() => conn.command({ action: playing ? 'stop' : 'start' })}
-      >
-        {playing ? '停止' : '开始'}
-      </button>
+      <div className="transport-row">
+        {parked && (
+          <button className="side" disabled={!ready} onClick={() => conn.command({ action: 'seek', sectionIndex: 0, bar: 0 })}>
+            ⏮ 从头
+          </button>
+        )}
+        <button
+          className={`transport ${playing ? 'stop' : 'start'}`}
+          disabled={!ready}
+          onClick={() => conn.command({ action: playing ? 'stop' : 'start' })}
+        >
+          {playing ? '停止' : '开始'}
+        </button>
+        <button className="side" disabled={!ready || !compiled} onClick={() => setSheet('rehearsal')}>
+          排练
+        </button>
+      </div>
 
       {sheet === 'sound' && (
         <Sheet title="声音（只影响本机）" onClose={() => setSheet(null)}>
@@ -195,6 +213,18 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
             onChange={setSound}
             onEnable={() => audio.unlock()}
             onEditDrums={compiled ? openDrumEditor : undefined}
+          />
+        </Sheet>
+      )}
+      {sheet === 'rehearsal' && snap.playback && compiled && (
+        <Sheet title="排练控制（全房间同步）" onClose={() => setSheet(null)}>
+          {snap.error && <div className="banner">{ERROR_TEXT[snap.error]}</div>}
+          <RehearsalPanel
+            clock={conn.clock}
+            playback={snap.playback}
+            compiled={compiled}
+            onCommand={(cmd) => conn.command(cmd)}
+            onDone={() => setSheet(null)}
           />
         </Sheet>
       )}

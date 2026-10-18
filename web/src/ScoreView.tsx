@@ -2,6 +2,8 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import {
   barPosition,
   beatAt,
+  bpmAt,
+  pendingJump,
   DRUMS,
   partDetail,
   songPosition,
@@ -27,11 +29,14 @@ type Props = {
   flash: boolean;
   /** "再绕一遍" for the section at this form index. */
   onRepeat: (sectionIndex: number) => void;
+  /** Jump to the start of the section at this form index. */
+  onSeek: (sectionIndex: number) => void;
+  onLoop: (sectionIndex: number | null) => void;
   onEditDrums: () => void;
 };
 
 /** Re-renders every animation frame; everything shown is derived from the shared clock, never counted locally. */
-export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onEditDrums }: Props) {
+export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onSeek, onLoop, onEditDrums }: Props) {
   const [, setFrame] = useState(0);
   useEffect(() => {
     let id = requestAnimationFrame(function tick() {
@@ -44,14 +49,22 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   if (!clock.synced) return <div className="score loading">同步时钟中…</div>;
 
   const { song, beatsPerBar, sections } = compiled;
-  const beat = beatAt(playback, clock.serverNow());
+  const now = clock.serverNow();
+  const beat = beatAt(playback, now);
+  const bpm = bpmAt(playback, now);
+  const pending = pendingJump(playback, now);
+  const loop = playback.loop;
   const pos = songPosition(compiled, beat);
   const countIn = playback.playing && beat < 0;
   const waiting = playback.playing && beat < -beatsPerBar;
   const ended = beat >= compiled.totalBeats;
-  // Before the start (count-in or never started) show what's coming: the opening section and chord.
-  const shown = pos ?? (ended ? null : songPosition(compiled, 0));
+  // Where a seek (or the count-in) is about to land.
+  const target = pending?.beat !== undefined ? songPosition(compiled, pending.beat) : null;
+  // Before the start (count-in or never started) show what's coming: the section and chord it starts on.
+  const shown = pos ?? (ended ? null : (target ?? songPosition(compiled, 0)));
   const live = playback.playing && !!pos;
+  // Stopped inside the song: 开始 picks up from this bar.
+  const parked = !playback.playing && !!pos && beat > 0;
   const { beatInBar, phase } = barPosition(beat, beatsPerBar);
   const ticking = playback.playing && !waiting && !ended;
   const beatFlash = flash && ticking && phase < 0.12;
@@ -59,21 +72,28 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
   const spec = song.parts[part];
 
   const location = pos && `${pos.section.label} · 第 ${pos.barInSection} 小节 · 第 ${pos.beatInBar} 拍`;
+  const targetBar = target && `${target.section.label} 第 ${target.barInSection} 小节`;
   let where: string;
   if (ended) where = '结束';
-  else if (!playback.playing) where = location && beat > 0 ? `已停止 · ${location}` : '准备好了';
-  else if (waiting) where = '准备…';
-  else if (countIn) where = `预备 ${beatInBar}`;
+  else if (!playback.playing) where = parked ? `从 ${pos!.section.label} 第 ${pos!.barInSection} 小节开始` : '准备好了';
+  else if (waiting) where = targetBar && pending!.beat! > 0 ? `准备… 从 ${targetBar}` : '准备…';
+  else if (countIn) where = `预备 ${beatInBar}${targetBar && pending!.beat! > 0 ? ` · 从 ${targetBar}` : ''}`;
   else where = location!;
+  // A seek waiting for the barline; during the count-in the target is already in `where`.
+  const jumpNotice = !countIn && targetBar && `下一小节 → ${targetBar}`;
 
   return (
     <div className="score">
       <div className="song-info">
         <span className="title">{song.title}</span>
         <span className="bpm">
-          {playback.bpm} BPM{song.key ? ` · ${song.key}` : ''}
+          {bpm}
+          {pending && pending.bpm !== bpm && <strong className="pending"> → {pending.bpm}</strong>} BPM
+          {(pending?.bpm ?? bpm) !== song.bpm && <small>（原速 {song.bpm}）</small>}
+          {song.key ? ` · ${song.key}` : ''}
         </span>
         <span className={`where${countIn && !waiting ? ' count-in' : ''}`}>{where}</span>
+        {jumpNotice && <span className="pending">{jumpNotice}</span>}
         <Dots count={beatsPerBar} current={ticking ? beatInBar : 0} flash={ticking && phase < 0.15} />
       </div>
 
@@ -84,7 +104,10 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
             shown={shown}
             beat={beat}
             live={live}
+            parked={parked}
+            looping={!!loop && loop.startBeat === shown.section.startBeat}
             onRepeat={playback.playing ? onRepeat : null}
+            onUnloop={() => onLoop(null)}
           />
         ) : (
           <div className="chord dim">—</div>
@@ -111,13 +134,18 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
           const active = pos?.section === s;
           const past = !!pos && i < sections.indexOf(pos.section);
           const progress = active ? (beat - s.startBeat) / (s.barCount * beatsPerBar) : 0;
+          const looped = loop?.startBeat === s.startBeat;
           return (
-            <li key={i} className={active ? 'active' : past ? 'past' : ''}>
-              {active && <span className="progress" style={{ width: `${progress * 100}%` }} />}
-              <span className="name">
-                {s.label}
-                {s.times > 1 && <small> ×{s.times}</small>}
-              </span>
+            <li key={i} className={`${active ? 'active' : past ? 'past' : ''}${looped ? ' looped' : ''}`}>
+              {/* Any member can jump; while playing it happens at the next barline. */}
+              <button onClick={() => onSeek(i)}>
+                {active && <span className="progress" style={{ width: `${progress * 100}%` }} />}
+                <span className="name">
+                  {looped && '🔁 '}
+                  {s.label}
+                  {s.times > 1 && <small> ×{s.times}</small>}
+                </span>
+              </button>
             </li>
           );
         })}
@@ -132,24 +160,33 @@ function LoopView({
   shown,
   beat,
   live,
+  parked,
+  looping,
   onRepeat,
+  onUnloop,
 }: {
   compiled: CompiledSong;
   shown: SongPosition;
   beat: number;
   live: boolean;
+  /** Stopped in this section: mark the bar 开始 picks up from. */
+  parked: boolean;
+  /** The room is looping this section, so there is no last pass and no next section. */
+  looping: boolean;
   onRepeat: ((sectionIndex: number) => void) | null;
+  onUnloop: () => void;
 }) {
   const { beatsPerBar: bpb } = compiled;
   const section = shown.section;
   const sectionIndex = compiled.sections.indexOf(section);
   const loopBeats = section.loopBars * bpb;
   const inSection = beat - section.startBeat;
-  const pass = live ? Math.floor(inSection / loopBeats) : 0;
-  const card = live ? Math.floor(inSection / bpb) % section.loopBars : -1;
+  const placed = live || parked;
+  const pass = placed ? Math.floor(inSection / loopBeats) : 0;
+  const card = placed ? Math.floor(inSection / bpb) % section.loopBars : -1;
   const inBar = inSection - Math.floor(inSection / bpb) * bpb;
   const looped = section.times > 1;
-  const lastPass = live && pass === section.times - 1;
+  const lastPass = live && !looping && pass === section.times - 1;
   const remainingBars = section.barCount - Math.floor(inSection / bpb);
   const next = compiled.sections[sectionIndex + 1];
   const bars = compiled.bars.slice(section.startBar, section.startBar + section.loopBars);
@@ -159,15 +196,25 @@ function LoopView({
     <div className="loop">
       <div className="loop-head">
         <span className="section-name">{section.label}</span>
-        {looped && (
-          <span className={`pass${lastPass ? ' last' : ''}`}>
-            {lastPass ? '最后一遍' : '第'} {pass + 1} / {section.times} {lastPass ? '' : '遍'}
-          </span>
+        {looping ? (
+          <span className="pass looping">🔁 循环中{looped ? ` · 第 ${pass + 1} / ${section.times} 遍` : ''}</span>
+        ) : (
+          looped && (
+            <span className={`pass${lastPass ? ' last' : ''}`}>
+              {lastPass ? '最后一遍' : '第'} {pass + 1} / {section.times} {lastPass ? '' : '遍'}
+            </span>
+          )
         )}
-        {onRepeat && (
+        {looping ? (
+          <button className="repeat" onClick={onUnloop}>
+            取消循环
+          </button>
+        ) : (
+          onRepeat && (
           <button className="repeat" onClick={() => onRepeat(sectionIndex)}>
             再绕一遍
-          </button>
+            </button>
+          )
         )}
       </div>
       <div className="cards" style={{ '--cols': cols, '--rows': Math.ceil(bars.length / cols) } as CSSProperties}>
@@ -176,7 +223,7 @@ function LoopView({
           const slot = current ? Math.floor((inBar * bar.chords.length) / bpb) : -1;
           const chars = bar.chords.join(' ').length;
           return (
-            <div key={i} className={`card${current ? ' current' : ''}${live ? '' : ' dim'}`}>
+            <div key={i} className={`card${current ? ' current' : ''}${live || current ? '' : ' dim'}`}>
               <div className="card-chords" style={{ '--scale': Math.min(1, 2.6 / chars) } as CSSProperties}>
                 {bar.chords.map((c, j) => (
                   <span key={j} className={j === slot && bar.chords.length > 1 ? 'now' : ''}>
@@ -186,7 +233,7 @@ function LoopView({
               </div>
               <div className="card-dots">
                 {Array.from({ length: bpb }, (_, j) => (
-                  <span key={j} className={current && j === Math.floor(inBar) ? 'on' : ''} />
+                  <span key={j} className={live && current && j === Math.floor(inBar) ? 'on' : ''} />
                 ))}
               </div>
             </div>
