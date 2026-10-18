@@ -1,7 +1,7 @@
 import {
-  beatAt,
   DRUMS,
-  serverTimeAtBeat,
+  msPerBeat,
+  segments,
   soundEvents,
   type ClockSync,
   type CompiledSong,
@@ -39,7 +39,7 @@ export class AudioEngine {
   private playback: PlaybackState | null = null;
   private compiled: CompiledSong | null = null;
   private settings: SoundSettings | null = null;
-  /** Events before this beat are already scheduled; null re-derives it from "now". */
+  /** Events before this server time are already scheduled; null re-derives it from "now". */
   private cursor: number | null = null;
   private pending = new Set<{ node: AudioScheduledSourceNode; at: number }>();
   /** audioContext time = performance.now() / 1000 + delta, measured where sound leaves the speaker. */
@@ -142,25 +142,30 @@ export class AudioEngine {
     if (!ctx || !playback?.playing || !compiled || !settings || !this.clock.synced) return;
     const delta = this.measureDelta();
 
-    // Event at beat b should be *heard* at serverTimeAtBeat(b); emit it latencyMs earlier.
+    // An event at server time T should be *heard* at T; emit it latencyMs earlier.
     // The window is measured on the audio clock: what reaches the speaker `outputMs` from now
     // is due at ctx.currentTime, and we queue LOOKAHEAD_MS beyond that.
     const perfNow = performance.now();
     const serverNow = this.clock.serverNow();
     const offset = serverNow - perfNow;
     const outputMs = Math.max(0, (ctx.currentTime - delta) * 1000 - perfNow);
-    const nowBeat = beatAt(playback, serverNow + settings.latencyMs + outputMs);
+    const nowT = serverNow + settings.latencyMs + outputMs;
     const lookahead = document.visibilityState === 'hidden' ? HIDDEN_LOOKAHEAD_MS : LOOKAHEAD_MS;
-    const to = beatAt(playback, serverNow + settings.latencyMs + outputMs + lookahead);
+    const to = nowT + lookahead;
     // After a throttled gap (tab in background), skip what is already due instead of bursting it out.
-    const from = Math.max(this.cursor ?? nowBeat, nowBeat);
+    const from = Math.max(this.cursor ?? nowT, nowT);
     if (to <= from) return;
     this.cursor = to;
 
-    for (const e of soundEvents(compiled, from, to, settings)) {
-      const perfMs = serverTimeAtBeat(playback, e.beat) - offset - settings.latencyMs;
-      const at = perfMs / 1000 + delta;
-      if (at >= ctx.currentTime) this.play(ctx, e, at);
+    // Jumps (seek, tempo change, count-in → start bar) and loop wraps split the window into straight runs.
+    for (const seg of segments(playback, from, to)) {
+      const mpb = msPerBeat(seg.bpm);
+      const endBeat = seg.beat + (seg.to - seg.from) / mpb;
+      for (const e of soundEvents(compiled, seg.beat, endBeat, settings)) {
+        const perfMs = seg.from + (e.beat - seg.beat) * mpb - offset - settings.latencyMs;
+        const at = perfMs / 1000 + delta;
+        if (at >= ctx.currentTime) this.play(ctx, e, at);
+      }
     }
   }
 
