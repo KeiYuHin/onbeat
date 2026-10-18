@@ -67,6 +67,29 @@ it('fails to save without a host save, and clears edits after a successful one',
   expect(b.at(-1)).toEqual({ type: 'edits', edits: { songId: song.id, drums: {} } });
 });
 
+it('resumes from a snapshot and takes back surviving peers silently', () => {
+  let changes = 0;
+  const { room, peer } = setup({ changed: () => changes++ });
+  peer('a');
+  room.handle('a', { type: 'cmd', action: 'start' });
+  expect(changes).toBe(1);
+
+  const resumed = createRoom('123456', { now: () => 9999, songs: () => [song] }, room.snapshot());
+  const inbox: ServerMsg[] = [];
+  resumed.restore({ id: 'a', send: (m) => inbox.push(m) }, 'drums');
+  expect(inbox).toEqual([]);
+  expect(resumed.snapshot()).toEqual(room.snapshot());
+  expect(resumed.partOf('a')).toBe('drums');
+  resumed.handle('a', { type: 'cmd', action: 'stop' });
+  expect(inbox.at(-1)?.type).toBe('state');
+});
+
+it('starts over on the first song when the saved song is gone', () => {
+  const { room } = setup();
+  const saved = { ...room.snapshot(), state: { ...room.snapshot().state, songId: 'deleted' } };
+  expect(createRoom('123456', { now: () => 0, songs: () => [song] }, saved).snapshot().state.songId).toBe(song.id);
+});
+
 it('stops broadcasting to a peer that left', () => {
   const { room, peer } = setup();
   const a = peer('a');

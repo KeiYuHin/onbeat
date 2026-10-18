@@ -254,10 +254,12 @@ interface SongLibrary {
 - 地址先用 `*.workers.dev`（乐队在加拿大，可以直接访问），HTTPS 自带，iOS Wake Lock 可用。以后要短一点的链接再买域名。
 - 公开仓库的 GitHub Action 在 push 到 main 时部署 Worker（`CLOUDFLARE_API_TOKEN` 放 repo secrets）。
 - `npm run server`（Node + `ws`）保留，作为排练室没网时的局域网模式。
-- 房间逻辑拆成与传输无关的 `shared/src/room.ts`（`createRoom`，已完成），外面两个适配器：Node `ws`（`server.ts`，已完成）和 Durable Object。一个房间对象只管一个房间；时间、曲库和保存由宿主注入；房间号分配、空房间过期、心跳归传输层管。现有的模拟测试继续跑 Node 这一侧。
+- 房间逻辑拆成与传输无关的 `shared/src/room.ts`（`createRoom`），外面两个适配器：Node `ws`（`server/src/server.ts`）和 Durable Object（`worker/src/roomObject.ts`），都已完成。一个房间对象只管一个房间；时间、曲库和保存由宿主注入；房间号分配、空房间过期、心跳归传输层管。现有的模拟测试继续跑 Node 这一侧。
+- **连接地址带房间号**：`/ws?room=123456`（加入/重连）或 `/ws?create`（新建）。Worker 在连接建立前就要知道转给哪个 DO：加入按房间号 `idFromName`；新建时 Worker 随机取号，DO 里已有房间就回 409，Worker 换号重试。连上之后的消息（`create`/`join`）不变，Node 服务器忽略这些参数。
 - DO 的注意事项：
-  - Workers 里 `performance.now()` 不是单调时钟，同步代码执行期间也不前进；DO 休眠后内存清空。所以 **DO 侧用 `Date.now()` 作为服务端时间**（这是"不用 `Date.now()`"规则的唯一例外，只限 DO），房间状态写进 DO storage，唤醒后恢复。
-  - 心跳改成客户端 ping，DO 用自动应答回复，不为心跳唤醒 DO。时钟同步的 ping 仍由 DO 处理。
+  - Workers 里 `performance.now()` 不是单调时钟，同步代码执行期间也不前进；DO 休眠后内存清空。所以 **DO 侧用 `Date.now()` 作为服务端时间**（这是"不用 `Date.now()`"规则的唯一例外，只限 DO），房间状态（播放状态 + 鼓谱改动）每次变化都写进 DO storage，唤醒后恢复；成员的 id 和声部存在各自 socket 的 attachment 里，跟着 socket 一起活过休眠。
+  - 心跳：客户端本来每 30 秒做一次时钟重同步，DO 记每个 socket 最后一条消息的时间，有人在线时每分钟用 alarm 检查一次，超过 150 秒没消息的 socket 关掉（后台标签页的计时器会被限到约每分钟一次，所以留了余量）。不用自动应答：时钟 ping 反正会唤醒 DO。
+  - 空房间：最后一个人离开后 10 分钟，alarm 清空 storage，房间号可以重新分配。
   - DO 落在第一个连上的人附近的机房。走公网时 RTT 比局域网高，要真机测抖动，验收标准不变（设备间误差 < 20ms）。
 
 ### 4. 访问控制：链接带库密钥

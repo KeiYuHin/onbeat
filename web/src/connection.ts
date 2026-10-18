@@ -92,12 +92,13 @@ export class RoomConnection {
 
   private open() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    // Rejoining by code covers both the first join and reconnects after a create. The code is also
+    // in the URL because the Worker routes each socket to its room's Durable Object before it opens.
+    const room = this.snap.room;
+    const ws = new WebSocket(`${proto}://${location.host}/ws?${room ? `room=${room}` : 'create'}`);
     this.ws = ws;
     ws.onopen = () => {
       this.update({ status: 'open' });
-      // Rejoining by code covers both the first join and reconnects after a create.
-      const room = this.snap.room;
       this.send(room ? { type: 'join', room, part: this.part } : { type: 'create', part: this.part });
       // The server may have restarted, which resets its clock, so always resync on (re)connect.
       this.clock.start();

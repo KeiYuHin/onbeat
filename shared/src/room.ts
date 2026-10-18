@@ -14,7 +14,12 @@ export type RoomHost = {
    * resolves. Throws on failure. Without it the library is read-only and saving fails.
    */
   saveSong?(songId: string, drums: DrumEdits): Promise<void>;
+  /** Called after the playback state or edits change, so a host that can be evicted can persist `snapshot()`. */
+  changed?(): void;
 };
+
+/** What a room needs to resume after its host restarts. Members are not in it: they come back with their sockets. */
+export type RoomSnapshot = { code: string; state: PlaybackState; edits: RoomEdits };
 
 /** One connection in a room. Its id is the member id. */
 export type Peer = { id: string; send(msg: ServerMsg): void };
@@ -24,10 +29,13 @@ export type RoomMsg = Extract<ClientMsg, { type: 'setPart' | 'cmd' }>;
 
 export type Room = ReturnType<typeof createRoom>;
 
-export function createRoom(code: string, host: RoomHost) {
+/** A new room on the catalog's first song, or one resumed from `saved`. */
+export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
   const first = host.songs()[0];
-  let state: PlaybackState = loadSong(first, host.now());
-  let edits: RoomEdits = { songId: first.id, drums: {} };
+  // A song removed from the library while the room was saved sends the room back to the first song.
+  const resumable = saved && host.songs().some((s) => s.id === saved.state.songId);
+  let state: PlaybackState = resumable ? saved.state : loadSong(first, host.now());
+  let edits: RoomEdits = resumable ? saved.edits : { songId: first.id, drums: {} };
   const peers = new Map<string, Peer>();
   const members = new Map<string, Member>();
 
@@ -41,6 +49,7 @@ export function createRoom(code: string, host: RoomHost) {
 
   function setEdits(next: RoomEdits) {
     edits = next;
+    host.changed?.();
     broadcast({ type: 'edits', edits });
   }
 
@@ -126,6 +135,17 @@ export function createRoom(code: string, host: RoomHost) {
     },
     broadcast,
 
+    snapshot: (): RoomSnapshot => ({ code, state, edits }),
+
+    /** The member's current part, or undefined if the peer is not in the room. */
+    partOf: (peerId: string): Part | undefined => members.get(peerId)?.part,
+
+    /** Puts back a peer whose socket survived a host restart, without messaging anyone. */
+    restore(peer: Peer, part: Part) {
+      peers.set(peer.id, peer);
+      members.set(peer.id, { id: peer.id, part });
+    },
+
     join(peer: Peer, part: Part) {
       peers.set(peer.id, peer);
       members.set(peer.id, { id: peer.id, part });
@@ -155,6 +175,7 @@ export function createRoom(code: string, host: RoomHost) {
       const next = applyCommand(msg);
       if (typeof next === 'string') return void fail(next);
       state = next;
+      host.changed?.();
       broadcast({ type: 'state', state });
       if (msg.action === 'selectSong') setEdits({ songId: next.songId, drums: {} });
     },

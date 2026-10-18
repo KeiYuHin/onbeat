@@ -1,0 +1,20 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "onbeat",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // The built web app (npm run build -w web). Only /ws runs the Worker; everything else is a static file,
+  // and unknown paths get index.html so client-side routes like /r/123456 load the app.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/ws"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }],
+  // 8787 is the Node server; reachable from phones on the LAN for testing.
+  "dev": { "port": 8788, "ip": "0.0.0.0" }
+}

@@ -5,13 +5,15 @@
   "workspaces": [
     "shared",
     "server",
-    "web"
+    "web",
+    "worker"
   ],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
     "server": "npm run build -w web && npm run start -w server",
     "test": "vitest run",
-    "typecheck": "tsc -p shared && tsc -p server && tsc -p web"
+    "typecheck": "tsc -p shared && tsc -p server && tsc -p web && tsc -p worker",
+    "worker": "npm run build -w web && npm run dev -w worker"
   },
   "devDependencies": {
     "concurrently": "^10.0.6",

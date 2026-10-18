@@ -1,0 +1,16 @@
+{
+  "name": "@onbeat/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@onbeat/shared": "*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261018.1",
+    "wrangler": "^4.151.1"
+  }
+}
