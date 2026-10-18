@@ -44,6 +44,27 @@ it('saves drum edits into the file, keeping loop notation and compact bars', () 
   expect(loadSongFiles(dir)[0].song.sections.verse.bars).toHaveLength(16);
 });
 
+it('removes a section pattern that now follows the default', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'onbeat-songs-'));
+  const own = { kick: 'x...x...x...x...' };
+  const raw = {
+    id: 's',
+    title: 's',
+    bpm: 100,
+    timeSignature: [4, 4],
+    sections: { a: { bars: [['C']] }, b: { bars: [['G']] } },
+    form: ['a', 'b'],
+    parts: { drums: { label: '鼓', default: {}, sections: { a: { pattern: own }, b: { groove: 'x', pattern: own } } } },
+  };
+  writeFileSync(join(dir, 's.json'), JSON.stringify(raw));
+  saveDrumEdits(loadSongFiles(dir)[0], { default: own, sections: { a: 'default', b: 'default' } });
+  expect(JSON.parse(readFileSync(join(dir, 's.json'), 'utf8')).parts.drums).toEqual({
+    label: '鼓',
+    default: { pattern: own },
+    sections: { b: { groove: 'x' } },
+  });
+});
+
 it('keeps lines short when formatting', () => {
   const text = formatJson({ a: { b: Array.from({ length: 30 }, (_, i) => [`C${i}`]) }, c: [1, 2] });
   expect(text.split('\n').every((line) => line.length <= 100)).toBe(true);

@@ -1,5 +1,5 @@
 // Wire protocol shared by server and web: JSON messages over a single WebSocket.
-import type { DrumEdits, DrumPattern, ExtraPasses, Song } from './song';
+import type { DrumEdits, DrumPattern, ExtraPasses, SectionDrumEdit, Song } from './song';
 
 export const PARTS = ['guitar1', 'guitar2', 'bass', 'drums', 'keys'] as const;
 export type Part = (typeof PARTS)[number];
@@ -37,8 +37,13 @@ export type Command =
   | { action: 'selectSong'; songId: string }
   /** One more pass of the section at this form index; refused once it is (almost) over. */
   | { action: 'repeatSection'; sectionIndex: number }
-  /** Replace the drum pattern for a section (null: the song default); pattern null drops the edit. */
-  | { action: 'setDrums'; sectionId: string | null; pattern: DrumPattern | null }
+  /**
+   * Replace the drum pattern for a section (sectionId null: the whole-song default). Pattern 'default'
+   * makes the section follow the whole-song pattern; null undoes the room's edit.
+   */
+  | { action: 'setDrums'; sectionId: string | null; pattern: SectionDrumEdit | null }
+  /** Use one pattern for the whole song: it becomes the default and every section follows it. */
+  | { action: 'setDrumsAll'; pattern: DrumPattern }
   /** Write the room's edits into the song file. */
   | { action: 'saveSong' };
 
@@ -71,12 +76,12 @@ export type ServerMsg =
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
 
 /** Shape only; the server checks step counts and drum names against the song. */
-const isPatternShape = (p: unknown): p is DrumPattern | null =>
-  p === null ||
-  (typeof p === 'object' &&
-    !Array.isArray(p) &&
-    Object.keys(p).length <= 16 &&
-    Object.values(p).every((row) => typeof row === 'string' && row.length <= 64));
+const isPatternShape = (p: unknown): p is DrumPattern =>
+  typeof p === 'object' &&
+  p !== null &&
+  !Array.isArray(p) &&
+  Object.keys(p).length <= 16 &&
+  Object.values(p).every((row) => typeof row === 'string' && row.length <= 64);
 
 /** Validates untrusted client input; returns null for anything malformed. */
 export function parseClientMsg(raw: string): ClientMsg | null {
@@ -104,8 +109,14 @@ export function parseClientMsg(raw: string): ClientMsg | null {
         return { type: 'cmd', action: 'selectSong', songId: m.songId };
       if (m.action === 'repeatSection' && Number.isInteger(m.sectionIndex) && m.sectionIndex >= 0)
         return { type: 'cmd', action: 'repeatSection', sectionIndex: m.sectionIndex };
-      if (m.action === 'setDrums' && (m.sectionId === null || typeof m.sectionId === 'string') && isPatternShape(m.pattern))
+      if (
+        m.action === 'setDrums' &&
+        (m.sectionId === null || typeof m.sectionId === 'string') &&
+        (m.pattern === null || (m.pattern === 'default' && m.sectionId !== null) || isPatternShape(m.pattern))
+      )
         return { type: 'cmd', action: 'setDrums', sectionId: m.sectionId, pattern: m.pattern };
+      if (m.action === 'setDrumsAll' && isPatternShape(m.pattern))
+        return { type: 'cmd', action: 'setDrumsAll', pattern: m.pattern };
       if (m.action === 'saveSong') return { type: 'cmd', action: 'saveSong' };
       return null;
     default:

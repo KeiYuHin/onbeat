@@ -147,17 +147,25 @@ export async function startServer(opts: ServerOptions) {
     }
   }
 
-  function setDrums(room: Room, cmd: Extract<Command, { action: 'setDrums' }>): ErrorCode | null {
+  function setDrums(room: Room, cmd: Extract<Command, { action: 'setDrums' | 'setDrumsAll' }>): ErrorCode | null {
     const song = songById.get(room.state.songId)!;
-    if (cmd.sectionId !== null && !(cmd.sectionId in song.sections)) return 'bad-pattern';
-    if (cmd.pattern && checkDrumPattern(cmd.pattern, song.timeSignature[0] * 4)) return 'bad-pattern';
-    const { default: def, sections = {} } = room.edits.drums;
-    const drums: DrumEdits = { ...(def && { default: def }), sections: { ...sections } };
-    if (cmd.sectionId === null) {
-      if (cmd.pattern) drums.default = cmd.pattern;
-      else delete drums.default;
-    } else if (cmd.pattern) drums.sections![cmd.sectionId] = cmd.pattern;
-    else delete drums.sections![cmd.sectionId];
+    const pattern = cmd.pattern;
+    if (pattern && pattern !== 'default' && checkDrumPattern(pattern, song.timeSignature[0] * 4)) return 'bad-pattern';
+    let drums: DrumEdits;
+    if (cmd.action === 'setDrumsAll') {
+      // Sections with a pattern of their own in the song are told to follow the new default instead.
+      const own = Object.entries(song.parts.drums?.sections ?? {}).filter(([, d]) => typeof d.pattern === 'object');
+      drums = { default: cmd.pattern, sections: Object.fromEntries(own.map(([id]) => [id, 'default' as const])) };
+    } else {
+      if (cmd.sectionId !== null && !(cmd.sectionId in song.sections)) return 'bad-pattern';
+      const { default: def, sections = {} } = room.edits.drums;
+      drums = { ...(def && { default: def }), sections: { ...sections } };
+      if (cmd.sectionId === null) {
+        if (pattern && pattern !== 'default') drums.default = pattern;
+        else delete drums.default;
+      } else if (pattern) drums.sections![cmd.sectionId] = pattern;
+      else delete drums.sections![cmd.sectionId];
+    }
     room.edits = { songId: song.id, drums };
     broadcast(room, { type: 'edits', edits: room.edits });
     return null;
@@ -214,7 +222,7 @@ export async function startServer(opts: ServerOptions) {
         const room = conn.room;
         if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
         const fail = (code: ErrorCode | null) => code && send(conn, { type: 'error', code });
-        if (msg.action === 'setDrums') return fail(setDrums(room, msg));
+        if (msg.action === 'setDrums' || msg.action === 'setDrumsAll') return fail(setDrums(room, msg));
         if (msg.action === 'saveSong') return void save(room).then(fail);
         const next = applyCommand(room.state, msg);
         if (typeof next === 'string') return fail(next);

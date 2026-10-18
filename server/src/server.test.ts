@@ -151,6 +151,21 @@ describe('rehearsal edits', () => {
     expect((await b.next('edits')).edits).toEqual({ songId: 'waltz', drums: {} });
   });
 
+  it('applies one pattern to every section', async () => {
+    await server.close();
+    const own = { kick: 'x'.repeat(16) };
+    const songs = [{ ...TEST_SONGS[0], parts: { drums: { label: '鼓', default: {}, sections: { a: { pattern: own } } } } }];
+    server = await startServer({ songs, port: 0 });
+    const [a, b] = await inRoom();
+    const pattern = { snare: '....x.......x...' };
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: 'a', pattern });
+    await b.next('edits');
+    a.send({ type: 'cmd', action: 'setDrumsAll', pattern });
+    expect((await b.next('edits')).edits.drums).toEqual({ default: pattern, sections: { a: 'default' } });
+    a.send({ type: 'cmd', action: 'setDrums', sectionId: null, pattern: 'default' } as never);
+    expect((await a.next('error')).code).toBe('bad-message');
+  });
+
   it('saves edits through the hook and sends everyone the updated song', async () => {
     await server.close();
     const saved: unknown[] = [];

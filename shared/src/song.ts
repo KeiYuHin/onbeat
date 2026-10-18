@@ -114,8 +114,11 @@ export function parseSong(data: unknown): Song {
   return { ...structuredClone(s), sections } as Song;
 }
 
+/** A section's own pattern, or 'default' to drop it so the section follows the whole-song pattern. */
+export type SectionDrumEdit = DrumPattern | 'default';
+
 /** Drum patterns changed in a room but not yet saved to the song file. */
-export type DrumEdits = { default?: DrumPattern; sections?: Record<string, DrumPattern> };
+export type DrumEdits = { default?: DrumPattern; sections?: Record<string, SectionDrumEdit> };
 
 export const hasDrumEdits = (edits: DrumEdits | null | undefined) =>
   !!edits && (!!edits.default || Object.keys(edits.sections ?? {}).length > 0);
@@ -125,15 +128,25 @@ export function applyDrumEdits(song: Song, edits: DrumEdits | null | undefined):
   if (!edits || !hasDrumEdits(edits)) return song;
   const drums = song.parts.drums ?? { label: '鼓', default: {} };
   const sections = { ...drums.sections };
-  for (const [id, pattern] of Object.entries(edits.sections ?? {})) sections[id] = { ...sections[id], pattern };
+  for (const [id, edit] of Object.entries(edits.sections ?? {})) {
+    if (edit !== 'default') {
+      sections[id] = { ...sections[id], pattern: edit };
+    } else if (sections[id]) {
+      const { pattern: _, ...rest } = sections[id];
+      // Drop the section entirely once nothing is left, so saved files don't keep empty objects.
+      if (Object.keys(rest).length) sections[id] = rest;
+      else delete sections[id];
+    }
+  }
+  const { sections: _old, ...base } = drums;
   return {
     ...song,
     parts: {
       ...song.parts,
       drums: {
-        ...drums,
+        ...base,
         default: edits.default ? { ...drums.default, pattern: edits.default } : drums.default,
-        sections,
+        ...(Object.keys(sections).length && { sections }),
       },
     },
   };
