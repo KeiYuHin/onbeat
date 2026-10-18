@@ -295,7 +295,7 @@ interface SongLibrary {
 2. **M2 谱显示**：加载 JSON 歌曲，按声部显示和弦和扫弦型
 3. **M2.5 节拍器 + 鼓机**：Web Audio 调度、延迟补偿、16 步鼓机、本机出声开关
 4. **M3 排练控制**：跳段、循环某段、改速度、"从第 X 小节再来"
-5. **M3.9 部署与私有曲库**：曲库接口、房间逻辑拆分、Cloudflare Worker + Durable Object + R2、库密钥链接和二维码、通过 GitHub 保存到私有仓库
+5. **M3.9 部署与私有曲库**：曲库接口、房间逻辑拆分、Cloudflare Worker + Durable Object + R2、库密钥链接和二维码、通过 GitHub 保存到私有仓库（进行中：除"私有仓库同步 R2 的 Action"和"App 内保存走 GitHub"外都已完成并上线，地址 https://onbeat.yuxuan-qi.workers.dev）
 6. **M4 内容**：简单的歌曲编辑页、导入 ChordPro、上传 GP/MusicXML 并用 alphaTab 按声部渲染、同步光标（谱和资源文件都通过曲库接口读写）
 7. **M4.5 级数谱**：级数和弦数据模型、换调和显示方式切换、乐器提示、本地和弦图；PDF 导入命令行工具（本地 OCR + 大模型推理，全自动，第一期只做骨架）和导入 skill
 8. **M5（以后）**：速度图、原生 App + Ableton Link 纯局域网模式、Web MIDI 输出
