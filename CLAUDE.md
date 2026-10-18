@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 OnBeat is a PWA for band rehearsal. Each member opens a shared 6-digit room on their own phone and picks a part (guitar1 / guitar2 / bass / drums / keys). Any member can start or stop, and every device shows the same bar and beat, all driven by one shared clock. `SPEC.md` (written in Chinese) is the source of truth for scope, the sync model, the song format and the milestones. Read it before starting a milestone.
 
-Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M5 later. Status: M1 is done and has been tested on real devices. Measured RTT is about 7–9ms on LAN.
+Milestones: M1 sync core → M2 score display → M2.5 metronome + drum machine → M3 rehearsal controls → M4 content (editor, ChordPro, alphaTab) → M5 later. Status: M1 is done and has been tested on real devices (RTT is about 7–9ms on LAN). M2 is done and is waiting for phone testing.
 
 ## Commands
 
@@ -24,13 +24,15 @@ Node 24+, npm workspaces (`shared`, `server`, `web`). Run everything from the re
   - `protocol.ts`: message types, plus `parseClientMsg`, which validates all untrusted client input.
   - `timeline.ts`: pure functions for position math and state transitions.
   - `clock.ts`: `ClockSync`, which is transport-agnostic. The browser and the server tests use the same class.
+  - `song.ts`: `parseSong` validates hand-written JSON. `compileSong` unrolls `form` into a flat, beat-indexed timeline of bars and numbered sections ("副歌 2"). `songPosition` maps a beat to section, bar, chord and the next chord change.
 - **Position is derived, never streamed.** The server broadcasts `PlaybackState` (anchor time and beat, bpm) only when it changes. Each client computes `beatAt(state, clock.serverNow())` every frame. Any new command (seek, setBpm, loop) must be a pure `PlaybackState → PlaybackState` transition in `timeline.ts` that keeps `beatAt` continuous at the switch moment. Per the spec, seeks and BPM changes take effect at the next barline.
 - Both sides use `performance.now()` (monotonic). Never use `Date.now()`. A server restart resets its clock: `smoothOffset` jumps instead of blending when the change is >50ms, and clients resync on every reconnect.
 - **Start** anchors one count-in bar at `serverNow + 1500ms`, so beats are negative before song start: below −beatsPerBar means waiting, −beatsPerBar to 0 is the count-in.
 - `server/src/server.ts` (`startServer`) keeps all room state in memory. Empty rooms linger for 10 minutes so reloading phones can rejoin. A ping heartbeat reaps sleeping phones. The `latencyMs` option injects per-message delay in both directions for the simulation test, kept FIFO per connection.
 - `web/src/connection.ts` (`RoomConnection`) owns one socket and reconnects, rejoining by room code. It feeds React through `useSyncExternalStore`. The `Room` component creates it in an effect, so StrictMode double-mounts are safe.
-- The protocol goes slightly beyond the spec: `create {part}` (the server generates the code), plus server-to-client `welcome {room, memberId}` and `error {code}`.
-- M1 has no songs: `songId` is `null` and beats per bar is fixed at `DEFAULT_BEATS_PER_BAR`. M2 replaces both from the song JSON.
+- Songs live in `songs/*.json`. The server loads them at startup (`SONGS_DIR` overrides the location), refuses to start on an invalid file, and sends the whole catalog to each client on join. The web app never bundles songs. Beats per bar is `timeSignature[0]`.
+- The protocol goes slightly beyond the spec: `create {part}` (the server generates the code), `cmd selectSong {songId}` (stops and resets to the song's tempo), plus server-to-client `welcome {room, memberId}`, `songs {songs}` and `error {code}`.
+- `web/src/ScoreView.tsx` re-renders every animation frame and derives everything from the current beat. Keep it free of local counters and timers.
 
 ## Everything follows the sync clock
 
