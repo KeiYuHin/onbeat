@@ -161,7 +161,7 @@ function LoopView({
         <span className="section-name">{section.label}</span>
         {looped && (
           <span className={`pass${lastPass ? ' last' : ''}`}>
-            {lastPass && '最后一遍 · '}第 {pass + 1} / {section.times} 遍
+            {lastPass ? '最后一遍' : '第'} {pass + 1} / {section.times} {lastPass ? '' : '遍'}
           </span>
         )}
         {onRepeat && (
@@ -193,11 +193,16 @@ function LoopView({
           );
         })}
       </div>
-      {live && next && lastPass && remainingBars <= Math.min(section.loopBars, 4) && (
-        <div className="preview">
-          下一段：<strong>{next.label}</strong> · {previewChords(compiled, next)}
-        </div>
-      )}
+      {/* Always takes its line, so the cards don't jump when the preview appears. */}
+      <div className="preview">
+        {live && next && lastPass && remainingBars <= Math.min(section.loopBars, 4) ? (
+          <>
+            下一段：<strong>{next.label}</strong> · {previewChords(compiled, next)}
+          </>
+        ) : (
+          ' '
+        )}
+      </div>
     </div>
   );
 }

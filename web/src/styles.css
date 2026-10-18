@@ -109,8 +109,13 @@ button:disabled {
   letter-spacing: 0.1em;
 }
 .topbar .me {
-  color: var(--accent);
+  font: inherit;
   font-size: 1.25rem;
+  color: var(--accent);
+  background: var(--panel);
+  border: 0;
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
 }
 .song-select {
   font: inherit;
@@ -353,16 +358,24 @@ button:disabled {
 .loop-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 4px 12px;
   font-size: 1.4rem;
 }
 .loop-head .section-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: bold;
 }
 .loop-head .pass {
   margin-left: auto;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.loop-head .repeat {
+  flex: none;
+  white-space: nowrap;
 }
 .loop-head .pass.last {
   color: #000;
@@ -429,6 +442,10 @@ button:disabled {
   background: var(--accent);
 }
 .preview {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 1.4rem;
   color: var(--muted);
 }
