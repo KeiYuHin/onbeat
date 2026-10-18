@@ -4,3 +4,4 @@ dist/
 .wrangler/
 # a private song library cloned or copied in here by mistake
 library/
+.dev.vars

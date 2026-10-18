@@ -12,8 +12,9 @@ import {
 } from '@onbeat/shared';
 import { AudioEngine } from './audio/engine';
 import { useSoundSettings } from './audio/settings';
-import { RoomConnection, type RoomTarget } from './connection';
+import { FATAL_ERRORS, RoomConnection, type RoomTarget } from './connection';
 import { DrumEditor } from './DrumEditor';
+import { Invite } from './Invite';
 import { RehearsalPanel } from './RehearsalPanel';
 import { ScoreView } from './ScoreView';
 import { Sheet } from './Sheet';
@@ -30,6 +31,8 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   'bad-position': '没有这个段落或小节',
   'bad-pattern': '鼓谱格式不对',
   'save-failed': '保存失败（看一下服务器窗口的报错）',
+  'bad-key': '这个房间用的是私有曲库，需要用乐队发的带密钥的链接打开',
+  'rate-limited': '尝试次数太多，请一分钟后再试',
 };
 
 const WAKE_LOCK_HINT: Partial<Record<WakeLockStatus, string>> = {
@@ -40,6 +43,7 @@ const WAKE_LOCK_HINT: Partial<Record<WakeLockStatus, string>> = {
 
 type Props = {
   part: Part;
+  libraryKey: string | null;
   onPartChange: (part: Part) => void;
   onLeave: () => void;
   onRoom: (room: string) => void;
@@ -53,23 +57,23 @@ export function Room({ target, ...props }: Props & { target: RoomTarget }) {
   // The connection outlives part switches (they're a message, not a rejoin), so only the first part matters here.
   const initialPart = useRef(props.part).current;
   useEffect(() => {
-    const conn = new RoomConnection(target, initialPart);
+    const conn = new RoomConnection(target, initialPart, props.libraryKey);
     const audio = new AudioEngine(conn.clock);
     setSession({ conn, audio });
     return () => {
       conn.close();
       audio.dispose();
     };
-  }, [target, initialPart]);
+  }, [target, initialPart, props.libraryKey]);
   return session && <RoomView {...session} {...props} />;
 }
 
-function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & Session) {
+function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom }: Props & Session) {
   const snap = useSyncExternalStore(conn.subscribe, conn.getSnapshot);
   const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
   const [sound, setSound] = useSoundSettings();
-  const [sheet, setSheet] = useState<null | 'sound' | 'rehearsal' | { drums: string | null }>(null);
+  const [sheet, setSheet] = useState<null | 'sound' | 'rehearsal' | 'invite' | { drums: string | null }>(null);
 
   useEffect(() => {
     if (snap.room && snap.memberId) onRoom(snap.room);
@@ -102,7 +106,7 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
     return () => document.removeEventListener('pointerdown', unlock);
   }, [audio, audioStatus]);
 
-  if (snap.error === 'room-not-found') {
+  if (snap.error && FATAL_ERRORS.includes(snap.error)) {
     return (
       <main className="lobby">
         <p className="error">{ERROR_TEXT[snap.error]}</p>
@@ -119,7 +123,9 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
   return (
     <main className="room">
       <header className="topbar">
-        <span className="code">{snap.room ?? '……'}</span>
+        <button className="code" disabled={!snap.room} onClick={() => setSheet('invite')} aria-label="邀请队友">
+          {snap.room ?? '……'}
+        </button>
         <select
           className="me"
           aria-label="我的声部"
@@ -214,6 +220,11 @@ function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & 
             onEnable={() => audio.unlock()}
             onEditDrums={compiled ? openDrumEditor : undefined}
           />
+        </Sheet>
+      )}
+      {sheet === 'invite' && snap.room && (
+        <Sheet title="邀请队友" onClose={() => setSheet(null)}>
+          <Invite room={snap.room} libraryKey={libraryKey} />
         </Sheet>
       )}
       {sheet === 'rehearsal' && snap.playback && compiled && (

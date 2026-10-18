@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { PARTS, PART_LABELS, ROOM_CODE_RE, type Part } from '@onbeat/shared';
 import type { RoomTarget } from './connection';
+import { forgetKey, savedKey, takeKeyFromUrl } from './libraryKey';
 import { Room } from './Room';
 
 const PART_KEY = 'onbeat.part';
@@ -13,17 +14,22 @@ function savedPart(): Part {
   return 'guitar1';
 }
 
-function setRoomInUrl(room: string | null) {
-  const url = new URL(location.href);
-  if (room) url.searchParams.set('room', room);
-  else url.searchParams.delete('room');
-  history.replaceState(null, '', url);
+/** The room in the address bar: /r/123456 (older links used ?room=123456). */
+function roomFromUrl(): string {
+  return location.pathname.match(/^\/r\/(\d{6})$/)?.[1] ?? new URL(location.href).searchParams.get('room') ?? '';
 }
+
+function setRoomInUrl(room: string | null) {
+  history.replaceState(null, '', room ? `/r/${room}` : '/');
+}
+
+takeKeyFromUrl();
 
 export function App() {
   const [target, setTarget] = useState<RoomTarget | null>(null);
   const [part, setPart] = useState<Part>(savedPart);
-  const [code, setCode] = useState(() => new URL(location.href).searchParams.get('room') ?? '');
+  const [code, setCode] = useState(roomFromUrl);
+  const [key, setKey] = useState(savedKey);
 
   const remember = (p: Part) => {
     try {
@@ -48,7 +54,7 @@ export function App() {
   };
 
   if (target) return (
-      <Room target={target} part={part} onPartChange={switchPart} onLeave={leave} onRoom={setRoomInUrl} />
+      <Room target={target} part={part} libraryKey={key} onPartChange={switchPart} onLeave={leave} onRoom={setRoomInUrl} />
     );;
 
   return (
@@ -92,6 +98,21 @@ export function App() {
       <button className="create" onClick={() => enter({ create: true })}>
         创建新房间
       </button>
+
+      <p className="hint">
+        {key ? '已连接私有曲库，新房间会用它。' : '现在只有公开的示例歌。用乐队发的链接打开一次，就能连上私有曲库。'}
+        {key && (
+          <button
+            className="link"
+            onClick={() => {
+              forgetKey();
+              setKey(null);
+            }}
+          >
+            断开
+          </button>
+        )}
+      </p>
     </main>
   );
 }

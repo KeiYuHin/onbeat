@@ -88,6 +88,17 @@ button:disabled {
 .error {
   font-size: 1.25rem;
 }
+.hint {
+  margin: 0;
+  color: var(--muted);
+}
+button.link {
+  background: none;
+  padding: 0 0.4rem;
+  font-size: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+}
 
 /* Room */
 .room {
@@ -107,6 +118,47 @@ button:disabled {
   font-size: 1.5rem;
   font-weight: bold;
   letter-spacing: 0.1em;
+  padding: 0.2rem 0.6rem;
+}
+.topbar .code:disabled {
+  opacity: 1;
+}
+
+/* Invite sheet */
+.invite {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+.invite-code {
+  margin: 0;
+  font-size: 3rem;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+}
+/* QR codes need a light quiet zone to scan, even in the dark theme. */
+.qr {
+  background: #fff;
+  padding: 16px;
+  border-radius: 12px;
+  width: min(80vw, 320px);
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.invite-url {
+  margin: 0;
+  color: var(--muted);
+  word-break: break-all;
+  font-size: 0.9rem;
+}
+.invite-actions {
+  display: flex;
+  gap: 8px;
 }
 .topbar .me {
   font: inherit;

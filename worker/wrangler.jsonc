@@ -15,6 +15,9 @@
     "bindings": [{ "name": "ROOMS", "class_name": "RoomObject" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomObject"] }],
+  // Private libraries: <library>/songs/<id>.json and <library>/assets/<id>/*. Fill it with
+  // scripts/sync-library.mjs. Library keys are the LIBRARY_KEYS secret (.dev.vars locally).
+  "r2_buckets": [{ "binding": "SONGS", "bucket_name": "onbeat-songs" }],
   // 8787 is the Node server; reachable from phones on the LAN for testing.
   "dev": { "port": 8788, "ip": "0.0.0.0" }
 }

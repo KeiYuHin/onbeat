@@ -66,8 +66,12 @@ export type Command =
   | { action: 'saveSong' };
 
 export type ClientMsg =
-  | { type: 'create'; part: Part }
-  | { type: 'join'; room: string; part: Part }
+  /**
+   * `key` is a library key (from a `#k=` link). Creating with one binds the room to that library;
+   * joining a room bound to a private library needs the same key. The LAN server ignores it.
+   */
+  | { type: 'create'; part: Part; key?: string }
+  | { type: 'join'; room: string; part: Part; key?: string }
   | { type: 'ping'; c0: number }
   /** Switch this member's part without leaving the room. */
   | { type: 'setPart'; part: Part }
@@ -82,7 +86,11 @@ export type ErrorCode =
   | 'looping'
   | 'bad-position'
   | 'bad-pattern'
-  | 'save-failed';
+  | 'save-failed'
+  /** The key is unknown, or the room's private library needs one. */
+  | 'bad-key'
+  /** Too many failed joins on this room; try again in a minute. */
+  | 'rate-limited';
 
 export type ServerMsg =
   | { type: 'welcome'; room: string; memberId: string }
@@ -95,6 +103,7 @@ export type ServerMsg =
 
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
 const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+const isKey = (v: unknown) => v === undefined || (typeof v === 'string' && v.length > 0 && v.length <= 128);
 
 /** Shape only; the server checks step counts and drum names against the song. */
 const isPatternShape = (p: unknown): p is DrumPattern =>
@@ -115,11 +124,11 @@ export function parseClientMsg(raw: string): ClientMsg | null {
   if (typeof m !== 'object' || m === null) return null;
   switch (m.type) {
     case 'create':
-      return isPart(m.part) ? { type: 'create', part: m.part } : null;
+      if (!isPart(m.part) || !isKey(m.key)) return null;
+      return { type: 'create', part: m.part, ...(m.key !== undefined && { key: m.key }) };
     case 'join':
-      return typeof m.room === 'string' && ROOM_CODE_RE.test(m.room) && isPart(m.part)
-        ? { type: 'join', room: m.room, part: m.part }
-        : null;
+      if (typeof m.room !== 'string' || !ROOM_CODE_RE.test(m.room) || !isPart(m.part) || !isKey(m.key)) return null;
+      return { type: 'join', room: m.room, part: m.part, ...(m.key !== undefined && { key: m.key }) };
     case 'ping':
       return Number.isFinite(m.c0) ? { type: 'ping', c0: m.c0 } : null;
     case 'setPart':

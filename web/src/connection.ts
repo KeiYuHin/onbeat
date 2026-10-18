@@ -27,6 +27,8 @@ export type RoomTarget = { room: string } | { create: true };
 const RECONNECT_MS = 1000;
 /** Errors from a single command (e.g. too late to repeat) fade out; losing the room does not. */
 const TRANSIENT_ERROR_MS = 4000;
+/** Errors that keep us out of the room. */
+export const FATAL_ERRORS: ErrorCode[] = ['room-not-found', 'bad-key', 'rate-limited'];
 
 /**
  * One room session: the socket (reconnecting on drop, e.g. when a phone wakes), clock sync,
@@ -52,6 +54,8 @@ export class RoomConnection {
   constructor(
     target: RoomTarget,
     private part: Part,
+    /** Library key from a #k= link: binds a new room to that library, and lets us into a private one. */
+    private key: string | null = null,
   ) {
     if ('room' in target) this.snap.room = target.room;
     this.clock = new ClockSync((c0) => this.send({ type: 'ping', c0 }));
@@ -99,7 +103,8 @@ export class RoomConnection {
     this.ws = ws;
     ws.onopen = () => {
       this.update({ status: 'open' });
-      this.send(room ? { type: 'join', room, part: this.part } : { type: 'create', part: this.part });
+      const key = this.key ? { key: this.key } : {};
+      this.send(room ? { type: 'join', room, part: this.part, ...key } : { type: 'create', part: this.part, ...key });
       // The server may have restarted, which resets its clock, so always resync on (re)connect.
       this.clock.start();
     };
@@ -128,7 +133,7 @@ export class RoomConnection {
         return this.update({ edits: msg.edits });
       case 'error':
         clearTimeout(this.errorTimer);
-        if (msg.code !== 'room-not-found')
+        if (!FATAL_ERRORS.includes(msg.code))
           this.errorTimer = setTimeout(() => this.update({ error: null }), TRANSIENT_ERROR_MS);
         return this.update({ error: msg.code });
     }
