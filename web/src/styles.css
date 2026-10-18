@@ -122,10 +122,72 @@ button:disabled {
   border: 0;
   max-width: 50vw;
 }
-.topbar .leave {
+.topbar .sound-button {
   margin-left: auto;
   font-size: 1rem;
   padding: 0.4rem 0.9rem;
+}
+.topbar .sound-button.on {
+  outline: 2px solid var(--start);
+}
+.topbar .leave {
+  font-size: 1rem;
+  padding: 0.4rem 0.9rem;
+}
+
+.sound-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 12px;
+}
+.sound-panel > .toggle {
+  align-self: flex-start;
+}
+.sound-panel .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sound-panel button {
+  background: #333;
+}
+.toggle.on {
+  background: var(--start);
+}
+.segmented {
+  display: flex;
+  gap: 2px;
+}
+.segmented button.selected {
+  background: var(--accent);
+  color: #000;
+}
+.sound-panel .small {
+  align-self: flex-start;
+  font-size: 1rem;
+  padding: 0.4rem 0.8rem;
+}
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 1.1rem;
+}
+.slider small {
+  color: var(--muted);
+}
+.slider input {
+  width: 100%;
+  height: 32px;
+  accent-color: var(--accent);
+}
+.sound-panel p {
+  margin: 0;
 }
 .members {
   list-style: none;
@@ -235,6 +297,17 @@ button:disabled {
   border-radius: 20px;
   padding: 8px;
 }
+.chord-panel.flash {
+  background: var(--flash);
+}
+.chord-panel.flash.accent {
+  background: var(--accent);
+  color: #000;
+}
+.chord-panel.flash .next,
+.chord-panel.flash .next strong {
+  color: inherit;
+}
 .chord {
   font-size: min(28vh, 30vw);
   line-height: 1;
@@ -288,6 +361,43 @@ button:disabled {
 .detail {
   font-size: 2rem;
 }
+.drum-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.drum-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.drum-name {
+  width: 3em;
+  flex: none;
+  color: var(--muted);
+}
+.step {
+  flex: 1;
+  height: clamp(22px, 5vh, 44px);
+  border-radius: 4px;
+  background: #333;
+}
+.step.beat:not(:nth-child(2)) {
+  margin-left: 5px;
+}
+.step.hit {
+  background: #9a9a9a;
+}
+.step.hit.accent {
+  background: var(--fg);
+}
+.step.current {
+  outline: 3px solid var(--accent);
+}
+.step.hit.current {
+  background: var(--accent);
+}
+
 .notes,
 .muted {
   color: var(--muted);

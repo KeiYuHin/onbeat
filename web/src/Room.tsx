@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { compileSong, PART_LABELS, type ErrorCode, type Part } from '@onbeat/shared';
+import { AudioEngine } from './audio/engine';
+import { useSoundSettings } from './audio/settings';
 import { RoomConnection, type RoomTarget } from './connection';
 import { ScoreView } from './ScoreView';
+import { SoundPanel } from './SoundPanel';
 import { useWakeLock, type WakeLockStatus } from './wakeLock';
 
 const ERROR_TEXT: Record<ErrorCode, string> = {
@@ -19,20 +22,29 @@ const WAKE_LOCK_HINT: Partial<Record<WakeLockStatus, string>> = {
 
 type Props = { part: Part; onLeave: () => void; onRoom: (room: string) => void };
 
-/** Owns the connection for as long as the user is in the room. */
+type Session = { conn: RoomConnection; audio: AudioEngine };
+
+/** Owns the connection and the audio engine for as long as the user is in the room. */
 export function Room({ target, ...props }: Props & { target: RoomTarget }) {
-  const [conn, setConn] = useState<RoomConnection | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   useEffect(() => {
-    const c = new RoomConnection(target, props.part);
-    setConn(c);
-    return () => c.close();
+    const conn = new RoomConnection(target, props.part);
+    const audio = new AudioEngine(conn.clock);
+    setSession({ conn, audio });
+    return () => {
+      conn.close();
+      audio.dispose();
+    };
   }, [target, props.part]);
-  return conn && <RoomView conn={conn} {...props} />;
+  return session && <RoomView {...session} {...props} />;
 }
 
-function RoomView({ conn, part, onLeave, onRoom }: Props & { conn: RoomConnection }) {
+function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
   const snap = useSyncExternalStore(conn.subscribe, conn.getSnapshot);
+  const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
+  const [sound, setSound] = useSoundSettings();
+  const [showSound, setShowSound] = useState(false);
 
   useEffect(() => {
     if (snap.room && snap.memberId) onRoom(snap.room);
@@ -40,6 +52,18 @@ function RoomView({ conn, part, onLeave, onRoom }: Props & { conn: RoomConnectio
 
   const song = snap.songs.find((s) => s.id === snap.playback?.songId);
   const compiled = useMemo(() => song && compileSong(song), [song]);
+
+  useEffect(() => {
+    audio.update(snap.playback, compiled ?? null, sound);
+  }, [audio, snap.playback, compiled, sound]);
+
+  // Sound was left on from last time, but browsers only start audio from a tap: take the first one anywhere.
+  useEffect(() => {
+    if (audioStatus !== 'locked') return;
+    const unlock = () => audio.unlock();
+    document.addEventListener('pointerdown', unlock, { once: true });
+    return () => document.removeEventListener('pointerdown', unlock);
+  }, [audio, audioStatus]);
 
   if (snap.error === 'room-not-found') {
     return (
@@ -79,6 +103,13 @@ function RoomView({ conn, part, onLeave, onRoom }: Props & { conn: RoomConnectio
             </li>
           ))}
         </ul>
+        <button
+          className={`sound-button${audioStatus === 'on' ? ' on' : ''}`}
+          aria-expanded={showSound}
+          onClick={() => setShowSound((v) => !v)}
+        >
+          {audioStatus === 'off' ? '🔇' : '🔊'} 声音
+        </button>
         <button className="leave" onClick={onLeave}>
           离开
         </button>
@@ -89,9 +120,11 @@ function RoomView({ conn, part, onLeave, onRoom }: Props & { conn: RoomConnectio
       )}
       {snap.error && <div className="banner">{ERROR_TEXT[snap.error]}</div>}
       {WAKE_LOCK_HINT[wakeLock] && <div className="banner subtle">{WAKE_LOCK_HINT[wakeLock]}</div>}
+      {audioStatus === 'locked' && <div className="banner">点一下屏幕开启声音</div>}
+      {showSound && <SoundPanel settings={sound} onChange={setSound} onEnable={() => audio.unlock()} />}
 
       {snap.playback && compiled ? (
-        <ScoreView clock={conn.clock} playback={snap.playback} compiled={compiled} part={part} />
+        <ScoreView clock={conn.clock} playback={snap.playback} compiled={compiled} part={part} flash={sound.flash} />
       ) : (
         <div className="score loading">加载中…</div>
       )}
