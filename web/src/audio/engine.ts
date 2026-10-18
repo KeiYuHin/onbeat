@@ -13,6 +13,12 @@ import type { SoundSettings } from './settings';
 /** Scheduler wake-up interval and how far ahead each wake-up schedules (SPEC: 25ms / 100ms). */
 const TICK_MS = 25;
 const LOOKAHEAD_MS = 100;
+/**
+ * With the screen locked or the page hidden, browsers throttle timers to about once a second, so a
+ * 100ms window would skip most beats (it sounded like the tempo dropped). Queue further ahead then.
+ * The cost is that stop and other commands may take up to this long to silence what's queued.
+ */
+const HIDDEN_LOOKAHEAD_MS = 3000;
 /** Re-measured audio↔performance offsets within this are smoothed; bigger changes (device switch) jump. */
 const DELTA_JUMP_S = 0.02;
 
@@ -41,7 +47,14 @@ export class AudioEngine {
   private listeners = new Set<() => void>();
   private status: AudioStatus = 'off';
 
-  constructor(private clock: ClockSync) {}
+  constructor(private clock: ClockSync) {
+    document.addEventListener('visibilitychange', this.onVisibility);
+  }
+
+  /** Fill the longer window right away, before timers get throttled. */
+  private onVisibility = () => {
+    if (this.timer) this.tick();
+  };
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -84,6 +97,7 @@ export class AudioEngine {
   }
 
   dispose() {
+    document.removeEventListener('visibilitychange', this.onVisibility);
     this.stopTimer();
     this.reschedule();
     void this.ctx?.close();
@@ -136,7 +150,8 @@ export class AudioEngine {
     const offset = serverNow - perfNow;
     const outputMs = Math.max(0, (ctx.currentTime - delta) * 1000 - perfNow);
     const nowBeat = beatAt(playback, serverNow + settings.latencyMs + outputMs);
-    const to = beatAt(playback, serverNow + settings.latencyMs + outputMs + LOOKAHEAD_MS);
+    const lookahead = document.visibilityState === 'hidden' ? HIDDEN_LOOKAHEAD_MS : LOOKAHEAD_MS;
+    const to = beatAt(playback, serverNow + settings.latencyMs + outputMs + lookahead);
     // After a throttled gap (tab in background), skip what is already due instead of bursting it out.
     const from = Math.max(this.cursor ?? nowBeat, nowBeat);
     if (to <= from) return;
