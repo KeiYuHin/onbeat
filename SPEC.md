@@ -17,8 +17,8 @@
 ## 技术栈
 - monorepo：`/web`（Vite + TypeScript + React）和 `/server`（Node + `ws`）
 - 共享类型放 `/shared`
-- server 无状态持久化，房间状态只存在内存里
-- server 同一份代码既能部署到云上，也能在排练室的笔记本上本地跑（`npm run server`，手机连笔记本的局域网 IP）
+- server 无状态持久化，房间状态只存在内存里（Cloudflare 上存在 Durable Object 里，见"部署与私有曲库"）
+- 同一份房间逻辑既能部署到 Cloudflare，也能在排练室的笔记本上本地跑（`npm run server`，手机连笔记本的局域网 IP）
 
 ## 核心设计：同步模型（最重要，先做对）
 
@@ -197,14 +197,62 @@ type Chord = {
 - 手动验收：两台手机 + 一台电脑打开同一房间，点开始后三台的拍子闪烁肉眼看同步
 - iOS Safari 必须实测：音频需要用户点一下才能解锁，Wake Lock 需要 HTTPS
 
+## 部署与私有曲库（M3.9）
+
+目标：代码开源（MIT），自己的谱因为版权不公开；排练时发一个链接，任何设备打开就能用；后端不常驻运行。
+
+### 1. 两个仓库
+- **公开仓库 `onbeat`**：全部代码，加上示例谱（只放自己写的或公有领域的）。`.gitignore` 加 `library/`，防止误提交私有谱。
+- **私有仓库 `onbeat-library`**：`songs/*.json`、`assets/<songId>/*`（M4 的 GP/MusicXML，M4.5 的 PDF 原件）。
+- 不用 git submodule：公开仓库里不出现私有仓库的地址，两个仓库各自提交。
+- 本地开发：私有仓库 clone 在旁边，用 `SONGS_DIR=../onbeat-library/songs npm run dev`。
+- 别人 fork 项目后，换成自己的 `SONGS_DIR` 或自己的 R2 bucket 就能用自己的谱。
+
+### 2. 曲库接口
+server 不直接读文件，只认一个接口（替换现在的 `songs` 数组和 `saveSong` 钩子）：
+```ts
+interface SongLibrary {
+  list(): Promise<Song[]>;
+  save?(songId: string, raw: unknown): Promise<Song>;      // 没有就是只读
+  asset?(songId: string, name: string): Promise<Response>; // GP/PDF，M4 起
+}
+```
+实现：`FsLibrary`（本地/局域网，现在的 `songs.ts`）、`R2Library`（Cloudflare）、内存版（测试）。M4 编辑器和 M4.5 导入只通过这个接口读写谱。
+
+### 3. 部署：Cloudflare Workers
+- 一个 Worker：`web/dist` 作为静态资源；`/ws` 按房间转给 **Durable Object**（一个房间一个 DO），用 WebSocket Hibernation，没消息时不占内存、连接不断。
+- 谱和资源文件放 R2 私有 bucket，只有 Worker 能读。
+- 地址先用 `*.workers.dev`（乐队在加拿大，可以直接访问），HTTPS 自带，iOS Wake Lock 可用。以后要短一点的链接再买域名。
+- 公开仓库的 GitHub Action 在 push 到 main 时部署 Worker（`CLOUDFLARE_API_TOKEN` 放 repo secrets）。
+- `npm run server`（Node + `ws`）保留，作为排练室没网时的局域网模式。
+- 房间逻辑拆成与传输无关的 `room.ts`，外面两个适配器：Node `ws` 和 Durable Object。现有的模拟测试继续跑 Node 这一侧。
+- DO 的注意事项：
+  - Workers 里 `performance.now()` 不是单调时钟，同步代码执行期间也不前进；DO 休眠后内存清空。所以 **DO 侧用 `Date.now()` 作为服务端时间**（这是"不用 `Date.now()`"规则的唯一例外，只限 DO），房间状态写进 DO storage，唤醒后恢复。
+  - 心跳改成客户端 ping，DO 用自动应答回复，不为心跳唤醒 DO。时钟同步的 ping 仍由 DO 处理。
+  - DO 落在第一个连上的人附近的机房。走公网时 RTT 比局域网高，要真机测抖动，验收标准不变（设备间误差 < 20ms）。
+
+### 4. 访问控制：链接带库密钥
+- 一个部署里可以有多个"库"。每个库有一个密钥，存在 Worker secret 里；R2 里按库分前缀：`<库>/songs/…`、`<库>/assets/…`。
+- 公开仓库的示例谱是一个公开库，不需要密钥。
+- **排练链接：`https://<域名>/r/123456#k=<库密钥>`**，界面同时显示二维码。密钥放在 `#` 后面，不进访问日志。客户端把密钥存进 localStorage，以后打开不用再输。
+- 创建房间时出示密钥，房间就绑定到这个库。加入私有房间也必须带密钥，只知道房间号进不去。DO 对加入失败做频率限制。
+- 没有密钥只能看到公开库。
+
+### 5. 保存：git 是真源
+- 谱主要在电脑上写 JSON，私有仓库是唯一真源。
+- 私有仓库的 GitHub Action 在 push 时把 `songs/` 和 `assets/` 同步进 R2，然后通知 Worker 重新加载曲库并广播 `songs`。
+- App 里的保存（`saveSong`、M4 编辑器）：Worker 通过 GitHub Contents API 把改动提交到私有仓库（token 存 Worker secret），带上读取时的文件 sha。sha 对不上就说明电脑上已经改过，拒绝保存并提示，不覆盖。提交成功后同时写 R2，马上生效，不用等 Action。
+- 提交时保留原 JSON 的写法（`loop` 记号和排版），和现在的 `songs.ts` 一样。
+
 ## 里程碑
 1. **M1 同步核心**：房间、时钟同步、开始/停止、只显示拍子闪烁
 2. **M2 谱显示**：加载 JSON 歌曲，按声部显示和弦和扫弦型
 3. **M2.5 节拍器 + 鼓机**：Web Audio 调度、延迟补偿、16 步鼓机、本机出声开关
 4. **M3 排练控制**：跳段、循环某段、改速度、"从第 X 小节再来"
-5. **M4 内容**：简单的歌曲编辑页、导入 ChordPro、上传 GP/MusicXML 并用 alphaTab 按声部渲染、同步光标
-6. **M4.5 级数谱**：级数和弦数据模型、换调和显示方式切换、乐器提示；PDF 导入命令行工具（第一期只做骨架）和人工核对页
-7. **M5（以后）**：速度图、原生 App + Ableton Link 纯局域网模式、Web MIDI 输出
+5. **M3.9 部署与私有曲库**：曲库接口、房间逻辑拆分、Cloudflare Worker + Durable Object + R2、库密钥链接和二维码、通过 GitHub 保存到私有仓库
+6. **M4 内容**：简单的歌曲编辑页、导入 ChordPro、上传 GP/MusicXML 并用 alphaTab 按声部渲染、同步光标（谱和资源文件都通过曲库接口读写）
+7. **M4.5 级数谱**：级数和弦数据模型、换调和显示方式切换、乐器提示；PDF 导入命令行工具（第一期只做骨架）和人工核对页
+8. **M5（以后）**：速度图、原生 App + Ableton Link 纯局域网模式、Web MIDI 输出
 
 ## 给 Claude Code 的工作方式
 - 先做 M1，完成后停下来让我在两台手机上测试，再继续
