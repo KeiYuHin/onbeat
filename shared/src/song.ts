@@ -23,6 +23,7 @@ export type PartSpec = {
   sections?: Record<string, PartDetail>;
 };
 
+/** Parsed sections always list their bars unrolled; `{ loop, times }` in the JSON is expanded by parseSong. */
 export type Section = { label?: string; bars: string[][] };
 
 export type Song = {
@@ -47,7 +48,23 @@ const SECTION_LABELS: Record<string, string> = {
   outro: '尾奏',
 };
 
-/** Validates hand-written song JSON; throws with a message that points at the problem. */
+export const sectionName = (song: Song, id: string) => song.sections[id]?.label ?? SECTION_LABELS[id] ?? id;
+
+/** Problem with a drum pattern for a bar of `steps` sixteenths, or null if it is valid. */
+export function checkDrumPattern(pattern: unknown, steps: number): string | null {
+  if (typeof pattern !== 'object' || pattern === null || Array.isArray(pattern)) return 'pattern must be an object';
+  for (const [drum, row] of Object.entries(pattern)) {
+    if (!DRUMS.includes(drum as Drum)) return `unknown drum "${drum}" (expected ${DRUMS.join(', ')})`;
+    if (typeof row !== 'string' || !/^[xX.]+$/.test(row) || row.length !== steps)
+      return `"${drum}" must be ${steps} steps of x, X or .`;
+  }
+  return null;
+}
+
+/**
+ * Validates hand-written song JSON; throws with a message that points at the problem.
+ * Returns a normalized copy (loops expanded) and never modifies `data`.
+ */
 export function parseSong(data: unknown): Song {
   const fail = (msg: string): never => {
     throw new Error(`invalid song${typeof (data as any)?.id === 'string' ? ` "${(data as any).id}"` : ''}: ${msg}`);
@@ -61,37 +78,74 @@ export function parseSong(data: unknown): Song {
   if (!Array.isArray(ts) || ts.length !== 2 || !ts.every((n: unknown) => Number.isInteger(n) && (n as number) > 0))
     fail('timeSignature must be like [4, 4]');
   if (typeof s.sections !== 'object' || s.sections === null) fail('missing sections');
+  const sections: Record<string, Section> = {};
   for (const [id, sec] of Object.entries<any>(s.sections)) {
-    if (!Array.isArray(sec?.bars) || sec.bars.length === 0) fail(`section "${id}" has no bars`);
-    sec.bars.forEach((bar: unknown, i: number) => {
+    const looped = sec?.loop !== undefined;
+    const written = looped ? sec.loop : sec?.bars;
+    if (!Array.isArray(written) || written.length === 0) fail(`section "${id}" has no bars`);
+    if (looped && !(Number.isInteger(sec.times) && sec.times >= 1)) fail(`section "${id}" loop needs "times" (1 or more)`);
+    written.forEach((bar: unknown, i: number) => {
       if (!Array.isArray(bar) || bar.length === 0 || !bar.every((c) => typeof c === 'string' && c))
         fail(`section "${id}" bar ${i + 1} must be a non-empty array of chord names`);
     });
+    const bars: string[][] = looped ? Array.from({ length: sec.times }, () => written).flat() : written;
+    sections[id] = { ...(typeof sec.label === 'string' && { label: sec.label }), bars: structuredClone(bars) };
   }
   if (!Array.isArray(s.form) || s.form.length === 0) fail('form must list at least one section');
-  for (const id of s.form) if (!(id in s.sections)) fail(`form refers to unknown section "${id}"`);
+  for (const id of s.form) if (!(id in sections)) fail(`form refers to unknown section "${id}"`);
   if (typeof s.parts !== 'object' || s.parts === null) fail('missing parts');
   const steps = ts[0] * 4;
   const checkDetail = (where: string, d: any) => {
     if (d.strum !== undefined && !/^[DU-]+$/.test(d.strum)) fail(`${where} strum may only use D, U and -`);
     if (typeof d.pattern !== 'object' || d.pattern === null) return;
-    for (const [drum, row] of Object.entries<any>(d.pattern)) {
-      if (!DRUMS.includes(drum as Drum)) fail(`${where} pattern has unknown drum "${drum}" (expected ${DRUMS.join(', ')})`);
-      if (typeof row !== 'string' || !/^[xX.]+$/.test(row) || row.length !== steps)
-        fail(`${where} pattern "${drum}" must be ${steps} steps of x, X or .`);
-    }
+    const problem = checkDrumPattern(d.pattern, steps);
+    if (problem) fail(`${where} pattern: ${problem}`);
   };
   for (const [part, spec] of Object.entries<any>(s.parts)) {
     if (!PARTS.includes(part as Part)) fail(`unknown part "${part}" (expected one of ${PARTS.join(', ')})`);
     if (typeof spec?.default !== 'object' || spec.default === null) fail(`part "${part}" needs a default`);
     checkDetail(`part "${part}"`, spec.default);
     for (const [id, d] of Object.entries<any>(spec.sections ?? {})) {
-      if (!(id in s.sections)) fail(`part "${part}" refers to unknown section "${id}"`);
+      if (!(id in sections)) fail(`part "${part}" refers to unknown section "${id}"`);
       if (typeof d !== 'object' || d === null) fail(`part "${part}" section "${id}" must be an object`);
       checkDetail(`part "${part}" section "${id}"`, d);
     }
   }
-  return s as Song;
+  return { ...structuredClone(s), sections } as Song;
+}
+
+/** Drum patterns changed in a room but not yet saved to the song file. */
+export type DrumEdits = { default?: DrumPattern; sections?: Record<string, DrumPattern> };
+
+export const hasDrumEdits = (edits: DrumEdits | null | undefined) =>
+  !!edits && (!!edits.default || Object.keys(edits.sections ?? {}).length > 0);
+
+/** The song with a room's drum edits applied to its drums part. */
+export function applyDrumEdits(song: Song, edits: DrumEdits | null | undefined): Song {
+  if (!edits || !hasDrumEdits(edits)) return song;
+  const drums = song.parts.drums ?? { label: '鼓', default: {} };
+  const sections = { ...drums.sections };
+  for (const [id, pattern] of Object.entries(edits.sections ?? {})) sections[id] = { ...sections[id], pattern };
+  return {
+    ...song,
+    parts: {
+      ...song.parts,
+      drums: {
+        ...drums,
+        default: edits.default ? { ...drums.default, pattern: edits.default } : drums.default,
+        sections,
+      },
+    },
+  };
+}
+
+/** Smallest number of bars that repeats to fill the section (8 bars of C Am F G C Am F G → 4). */
+export function repeatPeriod(bars: string[][]): number {
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((c, i) => c === b[i]);
+  for (let p = 1; p < bars.length; p++) {
+    if (bars.length % p === 0 && bars.every((bar, i) => same(bar, bars[i % p]))) return p;
+  }
+  return bars.length;
 }
 
 export type SectionSpan = {
@@ -100,6 +154,9 @@ export type SectionSpan = {
   startBeat: number;
   startBar: number; // 0-based index into CompiledSong.bars
   barCount: number;
+  /** The section is `loopBars` bars played `times` times (times is 1 when nothing repeats). */
+  loopBars: number;
+  times: number;
 };
 
 export type BarSpan = { chords: string[]; sectionIndex: number; startBeat: number };
@@ -113,7 +170,10 @@ export type CompiledSong = {
   totalBeats: number;
 };
 
-export function compileSong(song: Song): CompiledSong {
+/** Extra passes added live ("再绕一遍"), keyed by the section's index in the form. */
+export type ExtraPasses = Record<number, number>;
+
+export function compileSong(song: Song, extraPasses: ExtraPasses = {}): CompiledSong {
   const beatsPerBar = song.timeSignature[0];
   const totals = new Map<string, number>();
   for (const id of song.form) totals.set(id, (totals.get(id) ?? 0) + 1);
@@ -121,21 +181,25 @@ export function compileSong(song: Song): CompiledSong {
 
   const sections: SectionSpan[] = [];
   const bars: BarSpan[] = [];
-  for (const id of song.form) {
+  song.form.forEach((id, sectionIndex) => {
     const n = (seen.get(id) ?? 0) + 1;
     seen.set(id, n);
-    const def = song.sections[id];
-    const name = def.label ?? SECTION_LABELS[id] ?? id;
-    const sectionIndex = sections.length;
+    const written = song.sections[id].bars;
+    const loopBars = repeatPeriod(written);
+    const times = written.length / loopBars + (extraPasses[sectionIndex] ?? 0);
+    const name = sectionName(song, id);
     sections.push({
       id,
       label: totals.get(id)! > 1 ? `${name} ${n}` : name,
       startBeat: bars.length * beatsPerBar,
       startBar: bars.length,
-      barCount: def.bars.length,
+      barCount: loopBars * times,
+      loopBars,
+      times,
     });
-    for (const chords of def.bars) bars.push({ chords, sectionIndex, startBeat: bars.length * beatsPerBar });
-  }
+    for (let i = 0; i < loopBars * times; i++)
+      bars.push({ chords: written[i % loopBars], sectionIndex, startBeat: bars.length * beatsPerBar });
+  });
   return { song, beatsPerBar, sections, bars, totalBeats: bars.length * beatsPerBar };
 }
 

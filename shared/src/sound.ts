@@ -43,6 +43,30 @@ export function defaultDrumPattern(beatsPerBar: number): DrumPattern {
   };
 }
 
+export type DrumPreset = { name: string; pattern: DrumPattern };
+
+const PRESETS: DrumPreset[] = [
+  { name: '基本 8beat', pattern: { kick: 'x.......x.x.....', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.' } },
+  { name: '抒情 4beat', pattern: { kick: 'x.......x.......', snare: '....x.......x...', hat: 'x...x...x...x...' } },
+  { name: '16beat', pattern: { kick: 'x.....x...x.....', snare: '....x.......x...', hat: 'XxxxXxxxXxxxXxxx' } },
+  { name: '摇滚 叮叮镲', pattern: { kick: 'x.x.....x.x.....', snare: '....X.......X...', ride: 'x.x.x.x.x.x.x.x.' } },
+  { name: 'Disco', pattern: { kick: 'x...x...x...x...', snare: '....x.......x...', hat: '..x...x...x...x.' } },
+  { name: '放克', pattern: { kick: 'x..x..x...x.....', snare: '....x..x.x..x...', hat: 'xxxxxxxxxxxxxxxx' } },
+  { name: '雷鬼 One Drop', pattern: { kick: '........x.......', snare: '........X.......', hat: 'x.x.x.x.x.x.x.x.' } },
+  { name: '华尔兹', pattern: { kick: 'x...........', snare: '....x...x...', hat: 'x.x.x.x.x.x.' } },
+  { name: '3/4 8beat', pattern: { kick: 'x.......x...', snare: '....x.......', hat: 'x.x.x.x.x.x.' } },
+];
+
+/** Presets that fit this time signature, plus the automatic basic beat and an empty bar. */
+export function drumPresets(beatsPerBar: number): DrumPreset[] {
+  const steps = beatsPerBar * STEPS_PER_BEAT;
+  const fitting = PRESETS.filter((p) => Object.values(p.pattern).every((row) => row.length === steps));
+  return [
+    ...(fitting.length ? fitting : [{ name: '基本', pattern: defaultDrumPattern(beatsPerBar) }]),
+    { name: '清空', pattern: { kick: '.'.repeat(steps), snare: '.'.repeat(steps), hat: '.'.repeat(steps) } },
+  ];
+}
+
 /** The drum machine pattern for a section: the drums part's pattern if it is written as steps, else the default. */
 export function drumPatternFor(c: CompiledSong, sectionId: string): DrumPattern {
   const pattern = partDetail(c.song, 'drums', sectionId)?.pattern;

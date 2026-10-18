@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from '../../songs/example-song.json';
-import { compileSong, parseSong, type Song } from './song';
-import { DEFAULT_SOUND_OPTIONS, defaultDrumPattern, soundEvents, type SoundOptions } from './sound';
+import { checkDrumPattern, compileSong, parseSong, type Song } from './song';
+import { DEFAULT_SOUND_OPTIONS, defaultDrumPattern, drumPresets, soundEvents, type SoundOptions } from './sound';
 
 const example = compileSong(parseSong(exampleJson));
 const opts = (o: Partial<SoundOptions>): SoundOptions => ({ ...DEFAULT_SOUND_OPTIONS, ...o });
@@ -94,5 +94,11 @@ describe('drum machine', () => {
     expect(at(e, 0)).toEqual(['hat', 'kick']);
     expect(at(e, 1)).toEqual(['hat', 'snare']);
     expect(at(e, 2)).toEqual(['hat']);
+  });
+});
+
+describe('drum presets', () => {
+  it.each([3, 4, 5])('fit %i/4 bars', (bpb) => {
+    for (const p of drumPresets(bpb)) expect(checkDrumPattern(p.pattern, bpb * 4)).toBeNull();
   });
 });

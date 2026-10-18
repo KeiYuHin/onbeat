@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import exampleJson from '../../songs/example-song.json';
-import { compileSong, parseSong, partDetail, songPosition, strumIndex, type Song } from './song';
+import {
+  applyDrumEdits,
+  checkDrumPattern,
+  compileSong,
+  parseSong,
+  partDetail,
+  repeatPeriod,
+  songPosition,
+  strumIndex,
+  type Song,
+} from './song';
 
 const example = parseSong(exampleJson);
 
@@ -113,5 +123,70 @@ describe('strumIndex', () => {
     expect(strumIndex('D-DU-UDU', 0.5)).toBe(1);
     expect(strumIndex('D-DU-UDU', 3.99)).toBe(7);
     expect(strumIndex('D-DU-UDU', 4)).toBe(0);
+  });
+});
+
+describe('loops', () => {
+  it('expands { loop, times } into bars and leaves the input untouched', () => {
+    const raw = { ...example, sections: { ...example.sections, verse: { loop: [['C'], ['G']], times: 3 } } };
+    const before = JSON.stringify(raw);
+    const song = parseSong(raw);
+    expect(song.sections.verse.bars).toEqual([['C'], ['G'], ['C'], ['G'], ['C'], ['G']]);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it('rejects a loop without a valid times', () => {
+    expect(() => parseSong({ ...example, sections: { ...example.sections, verse: { loop: [['C']] } } })).toThrow(/times/);
+  });
+
+  it('detects the smallest repeating period', () => {
+    expect(repeatPeriod([['C'], ['Am'], ['F'], ['G'], ['C'], ['Am'], ['F'], ['G']])).toBe(4);
+    expect(repeatPeriod([['C'], ['C'], ['C']])).toBe(1);
+    expect(repeatPeriod([['C', 'G'], ['C']])).toBe(2);
+    expect(repeatPeriod([['F'], ['G'], ['C'], ['Am'], ['F'], ['G'], ['C'], ['C']])).toBe(8);
+  });
+
+  it('compiles sections as loopBars x times', () => {
+    const c = compileSong(example);
+    expect(c.sections.map((s) => [s.loopBars, s.times])).toEqual([
+      [4, 1],
+      [4, 2],
+      [8, 1],
+      [4, 2],
+      [8, 1],
+      [8, 1],
+    ]);
+  });
+
+  it('adds extra passes and shifts everything after', () => {
+    const plain = compileSong(example);
+    const c = compileSong(example, { 1: 2 });
+    expect(c.sections[1]).toMatchObject({ times: 4, barCount: 16 });
+    expect(c.sections[2].startBeat).toBe(plain.sections[2].startBeat + 8 * 4);
+    expect(c.totalBeats).toBe(plain.totalBeats + 8 * 4);
+    expect(c.bars[c.sections[1].startBar + 12].chords).toEqual(['C']);
+  });
+});
+
+describe('drum edits', () => {
+  const pattern = { kick: 'x'.repeat(16) };
+
+  it('overrides the default and single sections', () => {
+    const song = applyDrumEdits(example, { default: pattern, sections: { verse: { snare: 'x'.repeat(16) } } });
+    expect(partDetail(song, 'drums', 'intro')).toMatchObject({ groove: '基本 8beat', pattern });
+    expect(partDetail(song, 'drums', 'verse')?.pattern).toEqual({ snare: 'x'.repeat(16) });
+    expect(partDetail(song, 'drums', 'chorus')?.pattern).toHaveProperty('ride');
+    expect(partDetail(example, 'drums', 'intro')?.pattern).not.toEqual(pattern);
+  });
+
+  it('creates a drums part when the song has none', () => {
+    const song = applyDrumEdits(waltz, { default: { kick: 'x.'.repeat(6) } });
+    expect(partDetail(song, 'drums', 'a')?.pattern).toEqual({ kick: 'x.'.repeat(6) });
+  });
+
+  it('checks patterns against the bar length', () => {
+    expect(checkDrumPattern(pattern, 16)).toBeNull();
+    expect(checkDrumPattern(pattern, 12)).toMatch(/12 steps/);
+    expect(checkDrumPattern({ cowbell: 'x' }, 1)).toMatch(/cowbell/);
   });
 });
