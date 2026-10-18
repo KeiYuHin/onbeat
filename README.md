@@ -2,7 +2,7 @@
 
 Band rehearsal sync: each member sees their own part on their own phone, and everyone moves through the same bar and beat on one shared clock. See `SPEC.md` for the full design.
 
-Current milestone: **M3 rehearsal controls**. Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Any device can also play a click and/or a 16-step drum machine, locked to the same shared clock. Any member can jump to a section or bar, loop a section and change the tempo for the whole room.
+Current milestone: **M4a 白玉米谱 charts** (M1–M3.9 done). Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Chords can be written as letters or scale degrees and shown either way, with a capo; bars can change meter, songs can change key, and parts get cues. Any device can also play a click and/or a drum machine, locked to the same shared clock. Any member can jump to a section or bar, loop a section and change the tempo for the whole room.
 
 ## Run locally (rehearsal-room laptop)
 
@@ -57,7 +57,7 @@ Tap **🔊 声音** in the top bar. Settings are stored on each device and never
 - **本机出声**: master switch. Usually only the device on the speaker plays the drum machine; others leave it off or listen to a click in their own headphones.
 - **节拍器** with 四分 / 八分 / 十六分 subdivisions (downbeat is higher). **预备拍出声** clicks the count-in bar even when the metronome is off.
 - **鼓机** plays the song's `drums` pattern (or a basic beat if the song has none). **段落加花** adds a fill in the last bar of each section and a crash on the next downbeat.
-- **根音贝斯** plays the root of each chord (the bass note for slash chords like `G/B`) as a synthesized bass, for practising along. Rhythm: **长音** (one held note per chord), **四分** or **八分**. Tone: **贝斯** (a filtered sawtooth in the real bass range, whose overtones still come through phone speakers) or **正弦** (a pure sine an octave higher; clean in headphones). Chords that don't start with a note letter (N.C.) are skipped.
+- **根音贝斯** plays the root of each chord (the bass note for slash chords like `G/B`) as a synthesized bass, for practising along. Rhythm: **长音** (one held note per chord), **四分** or **八分**. Tone: **贝斯** (a filtered sawtooth in the real bass range, whose overtones still come through phone speakers) or **正弦** (a pure sine an octave higher; clean in headphones). Scale-degree chords are played in the song's key; anything that isn't a chord (N.C.) is skipped.
 - **闪屏** flashes the chord panel on every beat (orange on beat 1), so you can follow without sound.
 - **本机延迟补偿** (±300ms): use wired headphones or a speaker if you can. Bluetooth is typically 150–300ms late; if the click sounds later than the screen flash, move the slider right until they line up.
 
@@ -70,6 +70,21 @@ Browsers only start audio from a tap. If sound was on last time, you'll see 点�
 Put one JSON file per song in `songs/` (format in `SPEC.md`; `songs/example-song.json` is a template). Restart `npm run server` to pick it up (`npm run dev` reloads automatically). A broken file stops the server with a message naming the file and the problem.
 
 A section that repeats can be written as a loop: `"verse": { "loop": [["C"], ["Am"], ["F"], ["G"]], "times": 4 }` is the same as writing the 16 bars out. Saving from the drum editor keeps this notation and the rest of the file's layout.
+
+**Chords** can be letters (`"C"`, `"G/B"`, `"Fmaj7"`) or scale degrees as on 白玉米谱 charts (`"1"`, `"5/7"`, `"6m"`, `"4M7"`, `"b7"`, `"37"` for 3⁷, `"/#5"` to change only the bass). Degrees need the song's `"key"` (a major key: `"Ab"`, `"F#"`; write minor songs in their relative major, like 1=C). Each entry in a bar takes an equal share of it, and `"-"` holds the chord before it, so `["1", "-", "-", "5/7"]` is three beats of 1 and one of 5/7.
+
+A bar that needs more than chords is an object:
+
+```json
+{ "chords": ["6m"], "timeSignature": [2, 4], "cues": ["rit.", { "part": "drums", "text": "起鼓" }] }
+```
+
+- `timeSignature` changes the meter for that bar only. The song's own `timeSignature` can be compound: `[12, 8]` counts four dotted-quarter beats a bar, `bpm` is per dotted quarter, and drum patterns have one step per eighth note (12 steps).
+- `cues` are short notes shown on that part's screen (plain text: everyone's), from one bar ahead.
+
+A **key change** goes in `form`: `["verse", "chorus", { "section": "chorus", "key": "A" }]` plays the last chorus, and everything after it, in A.
+
+Each phone picks how chords are shown under **谱面**: letters, scale degrees, or both, and a guitar capo (letters then show the fingering, e.g. B with capo 2 shows A shapes).
 
 Drum machine patterns go in the `drums` part, one step per sixteenth note (16 steps in 4/4, 12 in 3/4); `x` hit, `X` accent, `.` rest. Instruments: `kick snare hat crash ride tom`. Put a different `pattern` under `sections` for e.g. the chorus:
 
