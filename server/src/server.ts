@@ -57,9 +57,9 @@ export async function startServer(opts: ServerOptions) {
     now,
     songs: () => songs,
     saveSong: library.save
-      ? async (songId, drums) => {
+      ? async (songId, drums, meta) => {
           // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
-          const updated = await library.save!(songId, (raw) => applyDrumEdits(raw, drums));
+          const updated = await library.save!(songId, (raw) => applyDrumEdits(raw, drums), meta);
           songs = songs.map((s) => (s.id === songId ? updated : s));
           for (const room of rooms.values()) room.broadcast({ type: 'songs', songs });
         }

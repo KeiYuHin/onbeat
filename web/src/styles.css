@@ -815,6 +815,23 @@ button.small {
 .editor-actions .apply-all {
   background: var(--start);
 }
+.device-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  color: var(--muted);
+}
+.device-name input {
+  font: inherit;
+  color: var(--fg);
+  background: #000;
+  border: 2px solid var(--panel);
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+  flex: 1 1 10em;
+}
 .drum-row.beats {
   height: 1.2em;
 }

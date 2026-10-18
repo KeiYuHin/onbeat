@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import exampleJson from './fixtures/example-song.json';
 import type { ServerMsg } from './protocol';
+import { SaveConflictError } from './library';
 import { createRoom, type RoomHost } from './room';
 import { parseSong } from './song';
 
@@ -61,9 +62,9 @@ it('fails to save without a host save, and clears edits after a successful one',
   const writable = setup({ saveSong: async (...args) => void saved.push(args) });
   const b = writable.peer('b');
   writable.room.handle('b', { type: 'cmd', action: 'setDrums', sectionId: null, pattern });
-  writable.room.handle('b', { type: 'cmd', action: 'saveSong' });
+  writable.room.handle('b', { type: 'cmd', action: 'saveSong', device: 'iPad 键盘' });
   await new Promise((r) => setTimeout(r));
-  expect(saved).toEqual([[song.id, { default: pattern, sections: {} }]]);
+  expect(saved).toEqual([[song.id, { default: pattern, sections: {} }, { device: 'iPad 键盘', room: '123456' }]]);
   expect(b.at(-1)).toEqual({ type: 'edits', edits: { songId: song.id, drums: {} } });
 });
 
@@ -88,6 +89,35 @@ it('starts over on the first song when the saved song is gone', () => {
   const { room } = setup();
   const saved = { ...room.snapshot(), state: { ...room.snapshot().state, songId: 'deleted' } };
   expect(createRoom('123456', { now: () => 0, songs: () => [song] }, saved).snapshot().state.songId).toBe(song.id);
+});
+
+it('reports a save conflict as its own error', async () => {
+  const { room, peer } = setup({ saveSong: async (id) => Promise.reject(new SaveConflictError(id)) });
+  const a = peer('a');
+  room.handle('a', { type: 'cmd', action: 'saveSong' });
+  await new Promise((r) => setTimeout(r));
+  expect(a.at(-1)).toEqual({ type: 'error', code: 'save-conflict' });
+});
+
+it('moves to the first song when the catalog loses the current one', () => {
+  let songs = [song, { ...song, id: 'other', title: 'Other' }];
+  const { room, peer } = setup({ songs: () => songs });
+  const a = peer('a');
+  room.handle('a', { type: 'cmd', action: 'selectSong', songId: 'other' });
+  songs = [song];
+  room.catalogChanged();
+  const [songsMsg, stateMsg, editsMsg] = a.slice(-3);
+  expect(songsMsg).toEqual({ type: 'songs', songs: [song] });
+  expect(stateMsg.type === 'state' && stateMsg.state.songId).toBe(song.id);
+  expect(editsMsg).toEqual({ type: 'edits', edits: { songId: song.id, drums: {} } });
+});
+
+it('only re-sends the catalog when the current song is still there', () => {
+  const { room, peer } = setup();
+  const a = peer('a');
+  const before = a.length;
+  room.catalogChanged();
+  expect(a.slice(before).map((m) => m.type)).toEqual(['songs']);
 });
 
 it('stops broadcasting to a peer that left', () => {

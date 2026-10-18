@@ -1,6 +1,7 @@
 // One rehearsal room per Durable Object, driving the same `createRoom` as the Node server.
 import { DurableObject } from 'cloudflare:workers';
 import {
+  applyDrumEdits,
   createRoom,
   parseClientMsg,
   type ClientMsg,
@@ -12,7 +13,7 @@ import {
   type ServerMsg,
   type Song,
 } from '@onbeat/shared';
-import { libraryForKey, PUBLIC_LIBRARY, songLibrary, type LibraryEnv } from './libraries';
+import { libraryForKey, PUBLIC_LIBRARY, songLibrary, type CatalogLibrary, type LibraryEnv } from './libraries';
 
 export type Env = LibraryEnv & {
   ROOMS: DurableObjectNamespace<RoomObject>;
@@ -41,6 +42,7 @@ export class RoomObject extends DurableObject<Env> {
   private room: Room | null = null;
   /** The library the room is bound to, and its catalog. */
   private library: string | null = null;
+  private catalog: CatalogLibrary | null = null;
   private songs: Song[] = [];
   /** Last message per socket. Lost on hibernation; a socket counts from when this object first sees it again. */
   private lastSeen = new Map<WebSocket, number>();
@@ -55,6 +57,14 @@ export class RoomObject extends DurableObject<Env> {
       const snapshot = this.room!.snapshot();
       this.ctx.storage.put('room', snapshot).catch((e) => console.error(`room ${snapshot.code}: saving state failed:`, e));
     },
+    saveSong: async (songId, drums, meta) => {
+      if (!this.catalog?.save) throw new Error(`library ${this.library} is read-only`);
+      // applyDrumEdits only touches `parts`, so it works on the raw JSON too.
+      const updated = await this.catalog.save(songId, (raw) => applyDrumEdits(raw, drums), meta);
+      this.songs = this.songs.map((s) => (s.id === songId ? updated : s));
+      this.room!.broadcast({ type: 'songs', songs: this.songs });
+      this.rememberCatalog();
+    },
   };
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -65,14 +75,19 @@ export class RoomObject extends DurableObject<Env> {
         ctx.storage.get<string>('library'),
       ]);
       if (!saved || !library) return;
-      this.songs = await songLibrary(env, library).list();
+      const catalog = songLibrary(env, library);
+      this.songs = await catalog.list();
       if (this.songs.length === 0) return;
       this.library = library;
+      this.catalog = catalog;
       this.room = createRoom(saved.code, this.host, saved);
       for (const ws of ctx.getWebSockets()) {
         const { id, part } = attachment(ws);
         if (part) this.room.restore(peer(ws, id), part);
       }
+      // Waking up loaded the catalog afresh. If it moved on while the room slept (a sync, or a
+      // save in another room), the phones still hold the old one: send them the new one.
+      if (catalog.version() !== (await ctx.storage.get<string | null>('catalogVersion'))) this.catalogChanged();
     });
   }
 
@@ -117,14 +132,16 @@ export class RoomObject extends DurableObject<Env> {
     if (!code || this.room) return send(ws, { type: 'error', code: 'room-not-found' });
     const library = libraryForKey(this.env, msg.key);
     if (!library) return send(ws, { type: 'error', code: 'bad-key' });
-    const songs = await songLibrary(this.env, library).list();
+    const catalog = songLibrary(this.env, library);
+    const songs = await catalog.list();
     if (songs.length === 0) return send(ws, { type: 'error', code: 'song-not-found' });
     // Another socket may have created the room while the library loaded.
     if (this.room) return send(ws, { type: 'error', code: 'room-not-found' });
     this.library = library;
+    this.catalog = catalog;
     this.songs = songs;
     this.room = createRoom(code, this.host);
-    await this.ctx.storage.put({ library, room: this.room.snapshot() });
+    await this.ctx.storage.put({ library, room: this.room.snapshot(), catalogVersion: catalog.version() });
     this.enter(ws, msg.part);
     await this.schedule();
   }
@@ -179,6 +196,7 @@ export class RoomObject extends DurableObject<Env> {
       this.drop(ws);
       ws.close(1001, 'no messages for too long');
     }
+    if (this.live(stale) > 0) await this.refreshCatalog();
     const emptyAt = await this.ctx.storage.get<number>('emptyAt');
     if (emptyAt !== undefined && now >= emptyAt + EMPTY_ROOM_TTL_MS && this.live(stale) === 0) {
       await this.ctx.storage.deleteAll();
@@ -186,6 +204,36 @@ export class RoomObject extends DurableObject<Env> {
       return;
     }
     await this.schedule(...stale);
+  }
+
+  /**
+   * Picks up a new catalog after a sync or a save from another room: the library's version changes,
+   * and this runs with the minute alarm while anyone is in the room.
+   */
+  private async refreshCatalog() {
+    const { catalog, room } = this;
+    if (!catalog || !room) return;
+    try {
+      if (!(await catalog.changed())) return;
+      const songs = await catalog.list();
+      if (songs.length === 0) return console.error(`room ${room.code}: library ${this.library} came back empty; keeping the old catalog`);
+      this.songs = songs;
+      this.catalogChanged();
+    } catch (e) {
+      console.error(`room ${room.code}: reloading the catalog failed:`, e);
+    }
+  }
+
+  /** Sends the room the current catalog and remembers which version its phones now have. */
+  private catalogChanged() {
+    this.room!.catalogChanged();
+    this.rememberCatalog();
+  }
+
+  private rememberCatalog() {
+    this.ctx.storage
+      .put('catalogVersion', this.catalog?.version() ?? null)
+      .catch((e) => console.error(`room ${this.room?.code}: saving the catalog version failed:`, e));
   }
 
   private drop(ws: WebSocket) {

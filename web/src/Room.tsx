@@ -31,6 +31,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   'bad-position': '没有这个段落或小节',
   'bad-pattern': '鼓谱格式不对',
   'save-failed': '保存失败（看一下服务器窗口的报错）',
+  'save-conflict': '歌曲文件已经在别处改过（比如电脑上改完推送了），这次没保存。等一分钟歌单更新后再保存',
   'bad-key': '这个房间用的是私有曲库，需要用乐队发的带密钥的链接打开',
   'rate-limited': '尝试次数太多，请一分钟后再试',
 };
@@ -249,7 +250,8 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
             initialSectionId={sheet.drums}
             onSet={(sectionId, pattern) => conn.command({ action: 'setDrums', sectionId, pattern })}
             onSetAll={(pattern) => conn.command({ action: 'setDrumsAll', pattern })}
-            onSave={() => conn.command({ action: 'saveSong' })}
+            onSave={(device) => conn.command({ action: 'saveSong', ...(device && { device }) })}
+            part={part}
           />
         </Sheet>
       )}

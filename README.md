@@ -121,6 +121,16 @@ Everything runs from `worker/` with the wrangler installed by `npm install`.
 5. Upload the library: `node scripts/sync-library.mjs ../../onbeat-library band --remote`.
 6. Open `https://onbeat.<subdomain>.workers.dev/#k=<the key>` on each phone once.
 
+To let the app save drum edits into the private library (they become commits in the library repo, named after the device that saved), give the Worker a GitHub token that can only write that repo: create a fine-grained token with **Contents: Read and write** on the library repo alone, then
+
+```sh
+echo '{"band":{"repo":"<owner>/<library repo>","token":"<the token>"}}' | npx wrangler secret put LIBRARY_GITHUB
+```
+
+Without it the private library is read-only in the app.
+
+The library repo has its own Action (`.github/workflows/sync.yml` there) that validates the songs and mirrors them into R2 on every push. It needs the same two secrets as below, `CLOUDFLARE_API_TOKEN` (with R2 edit) and `CLOUDFLARE_ACCOUNT_ID`, set on the library repo. Open rooms pick up the new songs within a minute.
+
 After that, pushes to `main` deploy through `.github/workflows/deploy.yml`, once the repo has two secrets: `CLOUDFLARE_API_TOKEN` (a token from the "Edit Cloudflare Workers" template) and `CLOUDFLARE_ACCOUNT_ID` (`npx wrangler whoami` shows it). Set them with `gh secret set CLOUDFLARE_API_TOKEN` and `gh secret set CLOUDFLARE_ACCOUNT_ID`.
 
 ## Licenses

@@ -15,7 +15,8 @@
     "test": "vitest run",
     "typecheck": "tsc -p shared && tsc -p server && tsc -p web && tsc -p worker",
     "worker": "npm run build -w web && npm run dev -w worker",
-    "deploy": "npm run build -w web && npm run deploy -w worker"
+    "deploy": "npm run build -w web && npm run deploy -w worker",
+    "validate-songs": "tsx server/src/validate.ts"
   },
   "devDependencies": {
     "concurrently": "^10.0.6",

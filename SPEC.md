@@ -289,6 +289,12 @@ interface SongLibrary {
 - 私有仓库的 GitHub Action 在 push 时把 `songs/` 和 `assets/` 同步进 R2，然后通知 Worker 重新加载曲库并广播 `songs`。
 - App 里的保存（`saveSong`、M4 编辑器）：Worker 通过 GitHub Contents API 把改动提交到私有仓库（token 存 Worker secret），带上读取时的文件 sha。sha 对不上就说明电脑上已经改过，拒绝保存并提示，不覆盖。提交成功后同时写 R2，马上生效，不用等 Action。
 - 提交时保留原 JSON 的写法（`loop` 记号和排版），和现在的 `songs.ts` 一样。
+- **实现（已完成）**：
+  - 同步：私有仓库的 `.github/workflows/sync.yml` 先用 `npm run validate-songs`（和 `parseSong` 同一套规则，外加"文件名 = id"）校验，不通过就停，不上传；通过后 `worker/scripts/sync-library.mjs` 只传改过的文件、删掉仓库里已删除的文件（靠 R2 里的 `<库>/manifest.json` 记上次传了什么），最后改写 `<库>/version`。
+  - "通知 Worker 重新加载"改成房间自己发现：有人在的房间本来每分钟有一次 alarm，顺便比较 `version` 的 etag，变了就重新读歌单并广播 `songs`，最多延迟 1 分钟。这样不用登记"现在有哪些房间"。DO 休眠后被唤醒时也会比较一次（存了"手机上现在是哪个版本"），休眠期间歌单变了也能推给手机。当前这首歌被删了，房间回到第一首。
+  - 保存：Secret `LIBRARY_GITHUB` = `{ "<库名>": { "repo": "<owner>/<name>", "token": "<只给这个仓库 Contents 读写权限的 token>" } }`。保存时先读 GitHub 上这首歌的 sha，和房间加载时那份内容算出来的 git blob sha 比较，不一致就拒绝（错误码 `save-conflict`），一致才 PUT（也带 sha，防止并发写）。没有改动就不提交。
+  - 提交信息带设备名：`songs/<id>.json: 保存鼓谱（<设备名>，房间 <房间号>）`。设备名在鼓谱编辑器的保存按钮下面填，存在本机（默认按设备类型和声部猜一个，比如"iPhone 鼓"）。局域网模式的保存也会把设备名打在服务器窗口的日志里。
+  - 保存成功后同时写 R2、改 `version`（其他房间一分钟内跟上），并删掉 manifest 里这个文件的记录，保证下次同步一定按 git 重新上传。
 
 ## 里程碑
 1. **M1 同步核心**：房间、时钟同步、开始/停止、只显示拍子闪烁

@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseSong, type Song, type SongLibrary } from '@onbeat/shared';
+import { formatJson, parseSong, type Song, type SongLibrary } from '@onbeat/shared';
+
+export { formatJson };
 
 /** A song as loaded, plus the JSON exactly as written, so saving keeps `loop` notation and unknown fields. */
 export type SongFile = { song: Song; raw: any; path: string };
@@ -36,7 +38,7 @@ export function fsLibrary(dir: string): SongLibrary {
     async list() {
       return [...files.values()].map((f) => f.song);
     },
-    async save(songId, edit) {
+    async save(songId, edit, meta) {
       const file = files.get(songId);
       if (!file) throw new Error(`no song "${songId}"`);
       const raw = edit(structuredClone(file.raw));
@@ -45,34 +47,9 @@ export function fsLibrary(dir: string): SongLibrary {
       writeFileSync(tmp, formatJson(raw) + '\n');
       renameSync(tmp, file.path);
       files.set(songId, { song, raw, path: file.path });
-      console.log(`saved ${file.path}`);
+      const by = [meta?.device, meta?.room && `room ${meta.room}`].filter(Boolean).join(', ');
+      console.log(`saved ${file.path}${by ? ` (${by})` : ''}`);
       return song;
     },
   };
-}
-
-const MAX_INLINE = 100;
-
-/** JSON with small objects and arrays kept on one line, the way song files are written by hand. */
-export function formatJson(value: unknown, indent = '', keyWidth = 0): string {
-  const flat = inline(value);
-  if (typeof value !== 'object' || value === null || indent.length + keyWidth + flat.length <= MAX_INLINE) return flat;
-  const inner = indent + '  ';
-  const items = Array.isArray(value)
-    ? value.map((v) => inner + formatJson(v, inner))
-    : Object.entries(value).map(([k, v]) => {
-        const key = `${JSON.stringify(k)}: `;
-        return inner + key + formatJson(v, inner, key.length);
-      });
-  const [open, close] = Array.isArray(value) ? ['[', ']'] : ['{', '}'];
-  return `${open}\n${items.join(',\n')}\n${indent}${close}`;
-}
-
-function inline(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(inline).join(', ')}]`;
-  if (typeof value === 'object' && value !== null) {
-    const entries = Object.entries(value).map(([k, v]) => `${JSON.stringify(k)}: ${inline(v)}`);
-    return entries.length ? `{ ${entries.join(', ')} }` : '{}';
-  }
-  return JSON.stringify(value);
 }

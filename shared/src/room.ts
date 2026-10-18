@@ -1,5 +1,6 @@
 // One rehearsal room, independent of transport: the Node `ws` server and a Durable Object both drive it.
 import type { ClientMsg, Command, ErrorCode, Member, Part, PlaybackState, RoomEdits, ServerMsg } from './protocol';
+import { SaveConflictError, type SaveMeta } from './library';
 import { checkDrumPattern, compileSong, type DrumEdits, type Song } from './song';
 import { loadSong, repeatSection, resumeBeat, seekTo, setBpm, setLoop, startPlayback, stopPlayback } from './timeline';
 
@@ -13,7 +14,7 @@ export type RoomHost = {
    * Writes drum edits into the song and tells every room about the new catalog (`songs`), then
    * resolves. Throws on failure. Without it the library is read-only and saving fails.
    */
-  saveSong?(songId: string, drums: DrumEdits): Promise<void>;
+  saveSong?(songId: string, drums: DrumEdits, meta: SaveMeta): Promise<void>;
   /** Called after the playback state or edits change, so a host that can be evicted can persist `snapshot()`. */
   changed?(): void;
 };
@@ -114,12 +115,13 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
     return null;
   }
 
-  async function save(): Promise<ErrorCode | null> {
+  async function save(device: string | undefined): Promise<ErrorCode | null> {
     const { songId, drums } = edits;
     if (!host.saveSong) return 'save-failed';
     try {
-      await host.saveSong(songId, drums);
+      await host.saveSong(songId, drums, { device, room: code });
     } catch (e) {
+      if (e instanceof SaveConflictError) return 'save-conflict';
       console.error(`saving song "${songId}" failed:`, e);
       return 'save-failed';
     }
@@ -139,6 +141,20 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
 
     /** The member's current part, or undefined if the peer is not in the room. */
     partOf: (peerId: string): Part | undefined => members.get(peerId)?.part,
+
+    /**
+     * Tells everyone about a new catalog. A room on a song that is gone moves to the first song,
+     * like a fresh room, rather than playing something that no longer exists.
+     */
+    catalogChanged() {
+      broadcast({ type: 'songs', songs: host.songs() });
+      if (song(state.songId)) return;
+      const next = host.songs()[0];
+      state = loadSong(next, host.now());
+      host.changed?.();
+      broadcast({ type: 'state', state });
+      setEdits({ songId: next.id, drums: {} });
+    },
 
     /** Puts back a peer whose socket survived a host restart, without messaging anyone. */
     restore(peer: Peer, part: Part) {
@@ -171,7 +187,7 @@ export function createRoom(code: string, host: RoomHost, saved?: RoomSnapshot) {
       }
       const fail = (code: ErrorCode | null) => code && peer.send({ type: 'error', code });
       if (msg.action === 'setDrums' || msg.action === 'setDrumsAll') return void fail(setDrums(msg));
-      if (msg.action === 'saveSong') return void save().then(fail);
+      if (msg.action === 'saveSong') return void save(msg.device).then(fail);
       const next = applyCommand(msg);
       if (typeof next === 'string') return void fail(next);
       state = next;

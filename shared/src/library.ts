@@ -11,7 +11,18 @@ export interface SongLibrary {
    * Applies `edit` to the song's raw JSON (as written, `loop` notation and unknown fields intact),
    * validates the result, stores it and returns the updated song. A library without it is read-only.
    */
-  save?(songId: string, edit: (raw: any) => unknown): Promise<Song>;
+  save?(songId: string, edit: (raw: any) => unknown, meta?: SaveMeta): Promise<Song>;
+}
+
+/** Who saved and from where; goes into the commit message or log line. */
+export type SaveMeta = { device?: string; room?: string };
+
+/** Thrown by `save` when the stored song changed since the library loaded it, so saving would overwrite that change. */
+export class SaveConflictError extends Error {
+  constructor(songId: string) {
+    super(`song "${songId}" changed since it was loaded`);
+    this.name = 'SaveConflictError';
+  }
 }
 
 /** A writable library held in memory. Each entry is raw song JSON. */

@@ -62,8 +62,8 @@ export type Command =
   | { action: 'setDrums'; sectionId: string | null; pattern: SectionDrumEdit | null }
   /** Use one pattern for the whole song: it becomes the default and every section follows it. */
   | { action: 'setDrumsAll'; pattern: DrumPattern }
-  /** Write the room's edits into the song file. */
-  | { action: 'saveSong' };
+  /** Write the room's edits into the song file. `device` names who saved, for the commit message and logs. */
+  | { action: 'saveSong'; device?: string };
 
 export type ClientMsg =
   /**
@@ -87,6 +87,8 @@ export type ErrorCode =
   | 'bad-position'
   | 'bad-pattern'
   | 'save-failed'
+  /** The song file changed elsewhere since this room loaded it (e.g. edited on a laptop and pushed). */
+  | 'save-conflict'
   /** The key is unknown, or the room's private library needs one. */
   | 'bad-key'
   /** Too many failed joins on this room; try again in a minute. */
@@ -103,6 +105,7 @@ export type ServerMsg =
 
 const isPart = (v: unknown): v is Part => PARTS.includes(v as Part);
 const isIndex = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+export const DEVICE_NAME_MAX = 40;
 const isKey = (v: unknown) => v === undefined || (typeof v === 'string' && v.length > 0 && v.length <= 128);
 
 /** Shape only; the server checks step counts and drum names against the song. */
@@ -153,7 +156,10 @@ export function parseClientMsg(raw: string): ClientMsg | null {
         return { type: 'cmd', action: 'setDrums', sectionId: m.sectionId, pattern: m.pattern };
       if (m.action === 'setDrumsAll' && isPatternShape(m.pattern))
         return { type: 'cmd', action: 'setDrumsAll', pattern: m.pattern };
-      if (m.action === 'saveSong') return { type: 'cmd', action: 'saveSong' };
+      if (m.action === 'saveSong') {
+        if (m.device !== undefined && !(typeof m.device === 'string' && m.device.trim().length > 0 && m.device.length <= DEVICE_NAME_MAX)) return null;
+        return { type: 'cmd', action: 'saveSong', ...(m.device !== undefined && { device: m.device.trim() }) };
+      }
       return null;
     default:
       return null;

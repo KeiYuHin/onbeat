@@ -10,8 +10,10 @@ import {
   type Drum,
   type DrumEdits,
   type DrumPattern,
+  type Part,
   type SectionDrumEdit,
 } from '@onbeat/shared';
+import { useDeviceName } from './deviceName';
 
 const DRUM_LABELS: Record<Drum, string> = {
   kick: '底鼓',
@@ -44,15 +46,19 @@ type Props = {
   initialSectionId: string | null;
   onSet: (sectionId: string | null, pattern: SectionDrumEdit | null) => void;
   onSetAll: (pattern: DrumPattern) => void;
-  onSave: () => void;
+  /** `device` is this device's name, recorded with the save. */
+  onSave: (device: string | undefined) => void;
+  /** This device's part, for the default device name. */
+  part: Part;
 };
 
 /**
  * Edits the drum machine patterns: one for the whole song (全曲默认), which every section uses
  * unless it has a pattern of its own. Every change syncs to the room.
  */
-export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll, onSave }: Props) {
+export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll, onSave, part }: Props) {
   const { song, beatsPerBar } = compiled;
+  const [device, setDevice] = useDeviceName(part);
   const steps = beatsPerBar * 4;
   const chunkSteps = useWide() ? steps : NARROW_STEPS;
   const sectionIds = [...new Set(song.form)];
@@ -154,13 +160,17 @@ export function DrumEditor({ compiled, edits, initialSectionId, onSet, onSetAll,
         )}
         {target !== null && own(target) && <button onClick={() => onSet(target, 'default')}>改回跟全曲默认</button>}
         {edited && <button onClick={() => onSet(target, null)}>撤销这里的改动</button>}
-        <button className="save" disabled={!hasDrumEdits(edits)} onClick={onSave}>
+        <button className="save" disabled={!hasDrumEdits(edits)} onClick={() => onSave(device.trim() || undefined)}>
           保存到歌曲文件
         </button>
       </div>
+      <label className="device-name">
+        本机名称（记在保存记录里）
+        <input value={device} maxLength={40} onChange={(e) => setDevice(e.target.value)} />
+      </label>
       <p className="muted">
         {hasDrumEdits(edits)
-          ? '有未保存的改动：房间解散或换歌后就没了，保存后写进服务器上的歌曲文件。'
+          ? '有未保存的改动：房间解散或换歌后就没了。保存后写进曲库（私有曲库会提交到 GitHub，记下本机名称）。'
           : '没有未保存的改动。'}
       </p>
     </div>
