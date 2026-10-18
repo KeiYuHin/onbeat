@@ -25,11 +25,20 @@ export function App() {
   const [part, setPart] = useState<Part>(savedPart);
   const [code, setCode] = useState(() => new URL(location.href).searchParams.get('room') ?? '');
 
-  const enter = (t: RoomTarget) => {
+  const remember = (p: Part) => {
     try {
-      localStorage.setItem(PART_KEY, part);
+      localStorage.setItem(PART_KEY, p);
     } catch {}
+  };
+
+  const enter = (t: RoomTarget) => {
+    remember(part);
     setTarget(t);
+  };
+
+  const switchPart = (p: Part) => {
+    remember(p);
+    setPart(p);
   };
 
   const leave = () => {
@@ -38,7 +47,9 @@ export function App() {
     setRoomInUrl(null);
   };
 
-  if (target) return <Room target={target} part={part} onLeave={leave} onRoom={setRoomInUrl} />;
+  if (target) return (
+      <Room target={target} part={part} onPartChange={switchPart} onLeave={leave} onRoom={setRoomInUrl} />
+    );;
 
   return (
     <main className="lobby">

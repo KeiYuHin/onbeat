@@ -44,6 +44,15 @@ describe('rooms', () => {
     expect((await a.next('members')).members.map((m) => m.part)).toEqual(['guitar1']);
   });
 
+  it("switches a member's part in place", async () => {
+    const a = await connect();
+    a.send({ type: 'create', part: 'guitar1' });
+    const { memberId } = await a.next('welcome');
+    await a.next('members');
+    a.send({ type: 'setPart', part: 'keys' });
+    expect((await a.next('members')).members).toEqual([{ id: memberId, part: 'keys' }]);
+  });
+
   it('rejects unknown rooms and malformed messages', async () => {
     const a = await connect();
     a.send({ type: 'join', room: '000000', part: 'keys' });

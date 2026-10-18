@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   applyDrumEdits,
   beatAt,
   compileSong,
   PART_LABELS,
+  PARTS,
   songPosition,
   type ErrorCode,
   type Part,
@@ -33,26 +34,33 @@ const WAKE_LOCK_HINT: Partial<Record<WakeLockStatus, string>> = {
   denied: '无法保持屏幕常亮（可能是省电模式），请把系统自动锁屏时间调长',
 };
 
-type Props = { part: Part; onLeave: () => void; onRoom: (room: string) => void };
+type Props = {
+  part: Part;
+  onPartChange: (part: Part) => void;
+  onLeave: () => void;
+  onRoom: (room: string) => void;
+};
 
 type Session = { conn: RoomConnection; audio: AudioEngine };
 
 /** Owns the connection and the audio engine for as long as the user is in the room. */
 export function Room({ target, ...props }: Props & { target: RoomTarget }) {
   const [session, setSession] = useState<Session | null>(null);
+  // The connection outlives part switches (they're a message, not a rejoin), so only the first part matters here.
+  const initialPart = useRef(props.part).current;
   useEffect(() => {
-    const conn = new RoomConnection(target, props.part);
+    const conn = new RoomConnection(target, initialPart);
     const audio = new AudioEngine(conn.clock);
     setSession({ conn, audio });
     return () => {
       conn.close();
       audio.dispose();
     };
-  }, [target, props.part]);
+  }, [target, initialPart]);
   return session && <RoomView {...session} {...props} />;
 }
 
-function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
+function RoomView({ conn, audio, part, onPartChange, onLeave, onRoom }: Props & Session) {
   const snap = useSyncExternalStore(conn.subscribe, conn.getSnapshot);
   const audioStatus = useSyncExternalStore(audio.subscribe, audio.getStatus);
   const wakeLock = useWakeLock();
@@ -106,7 +114,22 @@ function RoomView({ conn, audio, part, onLeave, onRoom }: Props & Session) {
     <main className="room">
       <header className="topbar">
         <span className="code">{snap.room ?? '……'}</span>
-        <span className="me">{PART_LABELS[part]}</span>
+        <select
+          className="me"
+          aria-label="我的声部"
+          value={part}
+          onChange={(e) => {
+            const p = e.target.value as Part;
+            conn.setPart(p);
+            onPartChange(p);
+          }}
+        >
+          {PARTS.map((p) => (
+            <option key={p} value={p}>
+              {PART_LABELS[p]}
+            </option>
+          ))}
+        </select>
         {snap.songs.length > 1 && (
           <select
             className="song-select"

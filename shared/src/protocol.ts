@@ -46,6 +46,8 @@ export type ClientMsg =
   | { type: 'create'; part: Part }
   | { type: 'join'; room: string; part: Part }
   | { type: 'ping'; c0: number }
+  /** Switch this member's part without leaving the room. */
+  | { type: 'setPart'; part: Part }
   | ({ type: 'cmd' } & Command);
 
 export type ErrorCode =
@@ -94,6 +96,8 @@ export function parseClientMsg(raw: string): ClientMsg | null {
         : null;
     case 'ping':
       return Number.isFinite(m.c0) ? { type: 'ping', c0: m.c0 } : null;
+    case 'setPart':
+      return isPart(m.part) ? { type: 'setPart', part: m.part } : null;
     case 'cmd':
       if (m.action === 'start' || m.action === 'stop') return { type: 'cmd', action: m.action };
       if (m.action === 'selectSong' && typeof m.songId === 'string')

@@ -204,6 +204,12 @@ export async function startServer(opts: ServerOptions) {
         if (!room) return send(conn, { type: 'error', code: 'room-not-found' });
         return enter(conn, room, msg.part);
       }
+      case 'setPart': {
+        const room = conn.room;
+        if (!room) return send(conn, { type: 'error', code: 'not-in-room' });
+        room.members.set(conn.id, { id: conn.id, part: msg.part });
+        return broadcast(room, { type: 'members', members: [...room.members.values()] });
+      }
       case 'cmd': {
         const room = conn.room;
         if (!room) return send(conn, { type: 'error', code: 'not-in-room' });

@@ -64,6 +64,12 @@ export class RoomConnection {
   };
   getSnapshot = () => this.snap;
 
+  /** Also used when rejoining after a reconnect. */
+  setPart(part: Part) {
+    this.part = part;
+    this.send({ type: 'setPart', part });
+  }
+
   command(cmd: Command) {
     this.send({ type: 'cmd', ...cmd });
   }
