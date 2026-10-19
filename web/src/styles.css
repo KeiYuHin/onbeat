@@ -609,9 +609,19 @@ button.link {
 .sheet-section + .sheet-section {
   margin-top: 14px;
 }
+.sheet-section {
+  transition: filter 0.4s, opacity 0.4s;
+}
+.sheet-section.blurred {
+  filter: blur(2px);
+  opacity: 0.4;
+}
+/* Section names stay quiet: the words are what matters here */
 .sheet-section h4 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 0.9rem;
+  font-weight: normal;
+  color: var(--muted);
 }
 .sheet-section h4 small {
   color: var(--muted);
@@ -619,10 +629,8 @@ button.link {
 .sheet-section.looped h4 {
   color: #9cc8ff;
 }
-.sheet-pass-label {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin-top: 6px;
+.sheet-pass + .sheet-pass {
+  margin-top: 4px;
 }
 .sheet-lines {
   margin: 0;

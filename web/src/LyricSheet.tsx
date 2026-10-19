@@ -1,7 +1,10 @@
 import { Fragment, memo, useEffect, useMemo, useRef } from 'react';
 import { lyricSheet, type CompiledSong } from '@onbeat/shared';
 import { ChordName, type ChordNamer } from './ChordName';
-import { chordLabel, type DisplaySettings } from './display';
+import { chordLabel, shortChord, type DisplaySettings } from './display';
+
+/** With a focus, sections further away than this aren't shown at all. */
+const FOCUS_RANGE = 2;
 
 /** After the reader touches or scrolls the sheet, it stops following the playing bar for this long. */
 const MANUAL_SCROLL_MS = 4000;
@@ -15,6 +18,11 @@ type Props = {
   target: number;
   /** Start of the looped section, if any. */
   loopStart: number | null;
+  /**
+   * The section being played (form index): only it is shown sharply, its neighbours blurred, and the rest
+   * left out, like the lyrics in a music player. Omitted for the full score, which shows everything.
+   */
+  focus?: number;
   /** Must keep its identity across renders, or the sheet re-renders every frame. */
   onSeekBar: (sectionIndex: number, bar: number) => void;
 };
@@ -24,11 +32,11 @@ type Props = {
  * nothing sung as chord boxes. It follows the playing bar, and tapping a bar jumps the room there. Memoized:
  * it re-renders when the bar changes, not every frame.
  */
-export const LyricSheet = memo(function LyricSheet({ compiled, display, current, target, loopStart, onSeekBar }: Props) {
+export const LyricSheet = memo(function LyricSheet({ compiled, display, current, target, loopStart, focus, onSeekBar }: Props) {
   const sheet = useMemo(() => lyricSheet(compiled, display.lyrics), [compiled, display.lyrics]);
   const scroller = useRef<HTMLDivElement>(null);
   const touched = useRef(-Infinity);
-  const name: ChordNamer = (slot, key) => chordLabel(slot, key, display, !!compiled.song.key);
+  const name: ChordNamer = (slot, key) => shortChord(chordLabel(slot, key, display, !!compiled.song.key));
 
   useEffect(() => {
     const box = scroller.current;
@@ -49,10 +57,12 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
   return (
     <div className="sheet" ref={scroller} onPointerDown={touch} onWheel={touch} onTouchMove={touch}>
       {sheet.map(({ sectionIndex, passes }) => {
+        if (focus !== undefined && Math.abs(sectionIndex - focus) > FOCUS_RANGE) return null;
         const section = compiled.sections[sectionIndex];
         const looped = loopStart === section.startBeat;
+        const blurred = focus !== undefined && sectionIndex !== focus;
         return (
-          <section key={sectionIndex} className={`sheet-section${looped ? ' looped' : ''}`}>
+          <section key={sectionIndex} className={`sheet-section${looped ? ' looped' : ''}${blurred ? ' blurred' : ''}`}>
             <h4>
               {looped && '🔁 '}
               {section.label}
@@ -60,7 +70,6 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
             </h4>
             {passes.map((blocks, p) => (
               <div key={p} className="sheet-pass">
-                {passes.length > 1 && <div className="sheet-pass-label">第 {p + 1} 遍</div>}
                 {blocks.map((block, k) =>
                   block.kind === 'bars' ? (
                     <div key={k} className="sheet-bars">

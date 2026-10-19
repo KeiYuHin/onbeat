@@ -36,6 +36,12 @@ export function chordLabel(slot: ChordSlot, key: Key, d: DisplaySettings, keyed:
   return d.chords === 'degree' ? { main: degree } : { main: letter, alt: degree };
 }
 
+/** The sheet's short spelling: maj7 → M7 (Cmaj7 → CM7), so chords take less room over the words. */
+export const shortChord = (label: ChordLabel): ChordLabel => {
+  const short = (s: string) => s.replace(/maj(?=\d)/g, 'M');
+  return { main: short(label.main), ...(label.alt && { alt: short(label.alt) }) };
+};
+
 /** "B调", or "B调 · 变调夹 2 按 A" with a capo. */
 export function keyText(key: Key, d: DisplaySettings): string {
   return d.capo ? `${key.name}调 · 变调夹 ${d.capo} 按 ${capoKey(key, d.capo).name}` : `${key.name}调`;

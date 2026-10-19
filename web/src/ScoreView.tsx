@@ -171,6 +171,7 @@ export function ScoreView(props: Props) {
             current={current}
             target={seekTarget}
             loopStart={loop?.startBeat ?? null}
+            focus={shown ? sections.indexOf(shown.section) : undefined}
             onSeekBar={onSeekBar}
           />
         </div>
