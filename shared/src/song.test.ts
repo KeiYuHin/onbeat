@@ -14,6 +14,7 @@ import {
   repeatPeriod as findPeriod,
   songPosition,
   strumIndex,
+  type CompiledSong,
   type Song,
 } from './song';
 
@@ -298,6 +299,48 @@ describe('loops', () => {
     expect(c.sections[2].startBeat).toBe(plain.sections[2].startBeat + 8 * 4);
     expect(c.totalBeats).toBe(plain.totalBeats + 8 * 4);
     expect(c.bars[c.sections[1].startBar + 12].chords.map((ch) => ch.name)).toEqual(['C']);
+  });
+});
+
+describe('lyrics', () => {
+  const song = parseSong({
+    id: 'lyrics',
+    title: 'test',
+    bpm: 80,
+    timeSignature: [4, 4],
+    sections: {
+      intro: { bars: [['C'], ['G']] },
+      verse: { loop: [['C'], ['G']], times: 2, lyrics: [['一', '二'], ['三', '四'], ['五', '六']] },
+      chorus: { bars: [['F'], ['G'], ['C'], ['C']], lyrics: [['副', '歌', '', '他']] },
+    },
+    form: ['intro', 'verse', 'chorus', 'verse', 'chorus'],
+    parts: {},
+  });
+  const sung = (c: CompiledSong, section: number) => {
+    const s = c.sections[section];
+    return c.bars.slice(s.startBar, s.startBar + s.barCount).map((b) => b.lyrics);
+  };
+
+  it('sings the next pass each time round, counting on across the form, and repeats the last', () => {
+    const c = compileSong(song);
+    expect(sung(c, 0)).toEqual(['', '']);
+    expect(sung(c, 1)).toEqual(['一', '二', '三', '四']);
+    expect(sung(c, 2)).toEqual(['副', '歌', '', '他']);
+    expect(sung(c, 3)).toEqual(['五', '六', '五', '六']);
+    expect(sung(c, 4)).toEqual(['副', '歌', '', '他']);
+  });
+
+  it('counts an extra pass as a pass', () => {
+    const c = compileSong(song, { 1: 1 });
+    expect(sung(c, 1)).toEqual(['一', '二', '三', '四', '五', '六']);
+    expect(sung(c, 3)).toEqual(['五', '六', '五', '六']);
+  });
+
+  it('needs one string per bar of the loop in every pass', () => {
+    const withVerse = (verse: object) => () => parseSong({ ...song, sections: { ...song.sections, verse } });
+    expect(withVerse({ loop: [['C'], ['G']], times: 2, lyrics: [['一']] })).toThrow(/pass 1 needs 2 strings, one per bar of the loop/);
+    expect(withVerse({ bars: [['C'], ['G']], lyrics: ['一', '二'] })).toThrow(/list of passes/);
+    expect(withVerse({ bars: [['C'], ['G']], lyrics: [['一', 2]] })).toThrow(/pass 1 needs 2 strings/);
   });
 });
 

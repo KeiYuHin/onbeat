@@ -7,3 +7,4 @@ export * from './library';
 export * from './format';
 export * from './room';
 export * from './chord';
+export * from './lyrics';

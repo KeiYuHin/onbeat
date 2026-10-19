@@ -65,8 +65,12 @@ export type Bar = {
  */
 export type Cue = { part?: Part; text: string };
 
-/** Parsed sections always list their bars unrolled; `{ loop, times }` in the JSON is expanded by parseSong. */
-export type Section = { label?: string; bars: Bar[] };
+/**
+ * Parsed sections always list their bars unrolled; `{ loop, times }` in the JSON is expanded by parseSong.
+ * `lyrics` has one group per pass, each a string per bar of the loop (or of `bars` as written): every time the
+ * section is played round once, wherever it is in the form, the next group is sung, and the last one repeats.
+ */
+export type Section = { label?: string; bars: Bar[]; lyrics?: string[][] };
 
 /**
  * One entry of the playing order. A `key` changes key from this section on (转调), until the next change.
@@ -134,7 +138,20 @@ export function parseSong(data: unknown): Song {
     if (looped && !(Number.isInteger(sec.times) && sec.times >= 1)) fail(`section "${id}" loop needs "times" (1 or more)`);
     const parsed = written.map((bar: unknown, i: number) => parseBar(bar, (msg) => fail(`section "${id}" bar ${i + 1} ${msg}`)));
     const bars: Bar[] = looped ? Array.from({ length: sec.times }, () => parsed).flat() : parsed;
-    sections[id] = { ...(typeof sec.label === 'string' && { label: sec.label }), bars: structuredClone(bars) };
+    const lyrics = sec.lyrics;
+    if (lyrics !== undefined) {
+      const ok = Array.isArray(lyrics) && lyrics.length > 0 && lyrics.every((g: unknown) => Array.isArray(g));
+      if (!ok) fail(`section "${id}" lyrics must be a list of passes, each a list of one string per bar`);
+      lyrics.forEach((group: unknown[], p: number) => {
+        if (group.length !== written.length || !group.every((l) => typeof l === 'string'))
+          fail(`section "${id}" lyrics pass ${p + 1} needs ${written.length} strings, one per bar${looped ? ' of the loop' : ''}`);
+      });
+    }
+    sections[id] = {
+      ...(typeof sec.label === 'string' && { label: sec.label }),
+      bars: structuredClone(bars),
+      ...(lyrics && { lyrics: structuredClone(lyrics) }),
+    };
   }
   if (s.key !== undefined && !(typeof s.key === 'string' && parseKey(s.key)))
     fail('key must be a major key like "C", "Ab" or "F#"');
@@ -279,6 +296,8 @@ export type BarSpan = {
   /** The key in effect, after any key change; C when the song has none. */
   key: Key;
   cues: Cue[];
+  /** What is sung in this bar on this pass; empty when nothing is. */
+  lyrics: string;
 };
 
 const C_MAJOR = parseKey('C')!;
@@ -323,6 +342,8 @@ export function compileSong(song: Song, extraPasses: ExtraPasses = {}): Compiled
   const totals = new Map<string, number>();
   for (const { section: id } of song.form) totals.set(id, (totals.get(id) ?? 0) + 1);
   const seen = new Map<string, number>();
+  // Lyric passes each section has used up so far.
+  const sung = new Map<string, number>();
 
   const sections: SectionSpan[] = [];
   const bars: BarSpan[] = [];
@@ -333,7 +354,7 @@ export function compileSong(song: Song, extraPasses: ExtraPasses = {}): Compiled
     if (change) key = parseKey(change)!;
     const n = (seen.get(id) ?? 0) + 1;
     seen.set(id, n);
-    const written = song.sections[id].bars;
+    const { bars: written, lyrics } = song.sections[id];
     const loopBars = repeatPeriod(written);
     const times = written.length / loopBars + (extraPasses[sectionIndex] ?? 0);
     const name = sectionName(song, id);
@@ -345,9 +366,17 @@ export function compileSong(song: Song, extraPasses: ExtraPasses = {}): Compiled
       const m = bar.timeSignature ? meter(bar.timeSignature) : songMeter;
       const chords = chordSlots(bar.chords, m.beats, key, lastChord);
       for (const slot of chords) lastChord = slot.chord ?? lastChord;
-      bars.push({ chords, sectionIndex, startBeat: beat, beats: m.beats, meter: m, key, cues: bar.cues ?? [] });
+      let words = '';
+      if (lyrics) {
+        const group = lyrics[0].length;
+        const pass = (sung.get(id) ?? 0) + Math.floor(i / group);
+        words = lyrics[Math.min(pass, lyrics.length - 1)][i % group];
+      }
+      const cues = bar.cues ?? [];
+      bars.push({ chords, sectionIndex, startBeat: beat, beats: m.beats, meter: m, key, cues, lyrics: words });
       beat += m.beats;
     }
+    if (lyrics) sung.set(id, (sung.get(id) ?? 0) + Math.ceil((loopBars * times) / lyrics[0].length));
     sections.push({
       id,
       label: totals.get(id)! > 1 ? `${name} ${n}` : name,
