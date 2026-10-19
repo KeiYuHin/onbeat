@@ -4,16 +4,21 @@ import { useStoredSettings } from './storedSettings';
 /** Letters (C G/B Am), scale degrees (1 5/7 6m, as on 白玉米谱), or letters with the degree beside them. */
 export type ChordNames = 'letter' | 'degree' | 'both';
 
-/** How this device shows chords; never synced, everyone picks their own. */
+/** The current pass of the section as bar cards, or the whole song in playing order. */
+export type ScoreLayout = 'loop' | 'full';
+
+/** How this device shows the chart; never synced, everyone picks their own. */
 export type DisplaySettings = {
   chords: ChordNames;
   /** Guitar capo fret: letters show the fingering, degrees stay as they are. */
   capo: number;
+  lyrics: boolean;
+  layout: ScoreLayout;
 };
 
 export const MAX_CAPO = 9;
 
-const DEFAULTS: DisplaySettings = { chords: 'letter', capo: 0 };
+const DEFAULTS: DisplaySettings = { chords: 'letter', capo: 0, lyrics: true, layout: 'loop' };
 
 export const useDisplaySettings = () => useStoredSettings('onbeat.display', DEFAULTS);
 

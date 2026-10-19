@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   applyDrumEdits,
   beatAt,
@@ -101,6 +101,12 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
     setSheet({ drums: pos?.section.id ?? null });
   };
 
+  // Stable, so the full score (memoized) doesn't re-render every frame.
+  const seekBar = useCallback(
+    (sectionIndex: number, bar: number) => conn.command({ action: 'seek', sectionIndex, bar }),
+    [conn],
+  );
+
   useEffect(() => {
     audio.update(snap.playback, compiled ?? null, sound);
   }, [audio, snap.playback, compiled, sound]);
@@ -197,6 +203,7 @@ function RoomView({ conn, audio, part, libraryKey, onPartChange, onLeave, onRoom
           flash={sound.flash}
           onRepeat={(sectionIndex) => conn.command({ action: 'repeatSection', sectionIndex })}
           onSeek={(sectionIndex) => conn.command({ action: 'seek', sectionIndex, bar: 0 })}
+          onSeekBar={seekBar}
           onLoop={(sectionIndex) => conn.command({ action: 'setLoop', sectionIndex })}
           onEditDrums={openDrumEditor}
           display={display}

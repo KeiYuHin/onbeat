@@ -598,6 +598,96 @@ button.link {
 .card-dots span.on {
   background: var(--accent);
 }
+.card-lyrics {
+  max-width: 100%;
+  padding: 0 6px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  text-align: center;
+  line-height: 1.25;
+  font-size: max(0.95rem, min(16cqw / var(--cols), 9cqh / var(--rows)));
+}
+.card.split .card-lyrics {
+  -webkit-line-clamp: 1;
+}
+
+/* Full score: the whole song in playing order, scrolling with the playing bar */
+.full-score {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 40vh;
+}
+.full-section h4 {
+  margin: 0 0 6px;
+  font-size: 1.3rem;
+}
+.full-section h4 small {
+  color: var(--muted);
+}
+.full-section.looped h4 {
+  color: #9cc8ff;
+}
+.full-pass + .full-pass {
+  margin-top: 8px;
+}
+.full-pass-label {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+.full-bars {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.full-bar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px;
+  text-align: left;
+  background: #2c2c2c;
+  border: 3px solid transparent;
+  border-radius: 10px;
+  font-weight: normal;
+}
+.full-bar.past {
+  opacity: 0.5;
+}
+.full-bar.current {
+  border-color: var(--accent);
+  background: #3a2c14;
+}
+.full-bar.target {
+  border: 3px dashed var(--accent);
+}
+.full-chords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4em;
+  font-size: 1.6rem;
+  font-weight: bold;
+  line-height: 1.1;
+}
+.full-lyrics {
+  font-size: 1.15rem;
+  line-height: 1.3;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.chord-panel.flash .full-bar {
+  background: rgba(0, 0, 0, 0.25);
+}
 .preview {
   flex: none;
   overflow: hidden;

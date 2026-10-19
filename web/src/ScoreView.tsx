@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   barPosition,
   beatAt,
@@ -7,6 +7,7 @@ import {
   pendingJump,
   cuesFor,
   DRUMS,
+  lyricText,
   partDetail,
   slotAt,
   songPosition,
@@ -38,6 +39,8 @@ type Props = {
   onRepeat: (sectionIndex: number) => void;
   /** Jump to the start of the section at this form index. */
   onSeek: (sectionIndex: number) => void;
+  /** Jump to a bar (0-based within the section). Must keep its identity across renders. */
+  onSeekBar: (sectionIndex: number, bar: number) => void;
   onLoop: (sectionIndex: number | null) => void;
   onEditDrums: () => void;
   /** This device's chord names and capo. */
@@ -45,7 +48,8 @@ type Props = {
 };
 
 /** Re-renders every animation frame; everything shown is derived from the shared clock, never counted locally. */
-export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, onSeek, onLoop, onEditDrums, display }: Props) {
+export function ScoreView(props: Props) {
+  const { clock, playback, compiled, part, flash, onRepeat, onSeek, onSeekBar, onLoop, onEditDrums, display } = props;
   const [, setFrame] = useState(0);
   useEffect(() => {
     let id = requestAnimationFrame(function tick() {
@@ -116,7 +120,27 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
       </div>
 
       <div className={`chord-panel${beatFlash ? (beatInBar === 1 ? ' flash accent' : ' flash') : ''}`}>
-        {shown ? (
+        {shown && display.layout === 'full' ? (
+          <>
+            <PassHead
+              compiled={compiled}
+              shown={shown}
+              placed={live || parked}
+              live={live}
+              looping={!!loop && loop.startBeat === shown.section.startBeat}
+              onRepeat={playback.playing ? onRepeat : null}
+              onUnloop={() => onLoop(null)}
+            />
+            <FullScore
+              compiled={compiled}
+              display={display}
+              current={live || parked ? shown.barIndex : -1}
+              target={target && pending!.beat! > 0 ? target.barIndex : -1}
+              loopStart={loop?.startBeat ?? null}
+              onSeekBar={onSeekBar}
+            />
+          </>
+        ) : shown ? (
           <LoopView
             compiled={compiled}
             shown={shown}
@@ -126,6 +150,7 @@ export function ScoreView({ clock, playback, compiled, part, flash, onRepeat, on
             looping={!!loop && loop.startBeat === shown.section.startBeat}
             jumpTo={jumpTo}
             name={name}
+            lyrics={display.lyrics}
             onRepeat={playback.playing ? onRepeat : null}
             onUnloop={() => onLoop(null)}
           />
@@ -190,6 +215,7 @@ function LoopView({
   looping,
   jumpTo,
   name,
+  lyrics,
   onRepeat,
   onUnloop,
 }: {
@@ -204,22 +230,22 @@ function LoopView({
   /** A seek landing at the end of the current bar. */
   jumpTo: NextUp | null;
   name: ChordNamer;
+  /** Show what is sung in each bar. */
+  lyrics: boolean;
   onRepeat: ((sectionIndex: number) => void) | null;
   onUnloop: () => void;
 }) {
   const section = shown.section;
   const sectionIndex = compiled.sections.indexOf(section);
-  // Bars can differ in length, so count bars rather than beats.
-  const barInSection = shown.barInSection - 1;
-  const placed = live || parked;
-  const pass = placed ? Math.floor(barInSection / section.loopBars) : 0;
-  const card = placed ? barInSection % section.loopBars : -1;
+  const { barInSection, pass, lastPass } = passOf(section, shown, live || parked, live, looping);
+  const card = live || parked ? barInSection % section.loopBars : -1;
   const inBar = beat - compiled.bars[shown.barIndex].startBeat;
-  const looped = section.times > 1;
-  const lastPass = live && !looping && pass === section.times - 1;
   const remainingBars = section.barCount - barInSection;
   const next = compiled.sections[sectionIndex + 1];
-  const bars = compiled.bars.slice(section.startBar, section.startBar + section.loopBars);
+  // This pass's bars: the chords repeat, the lyrics don't.
+  const first = section.startBar + pass * section.loopBars;
+  const bars = compiled.bars.slice(first, first + section.loopBars);
+  const sung = lyrics && bars.some((b) => b.lyrics);
   const cols = Math.min(bars.length, 4);
   // The card whose bottom half shows the first chord of what comes next: the current card before a seek,
   // or the last card for the whole last pass, so the change is in view well before it happens.
@@ -232,29 +258,15 @@ function LoopView({
 
   return (
     <div className="loop">
-      <div className="loop-head">
-        <span className="section-name">{section.label}</span>
-        {looping ? (
-          <span className="pass looping">🔁 循环中{looped ? ` · 第 ${pass + 1} / ${section.times} 遍` : ''}</span>
-        ) : (
-          looped && (
-            <span className={`pass${lastPass ? ' last' : ''}`}>
-              {lastPass ? '最后一遍' : '第'} {pass + 1} / {section.times} {lastPass ? '' : '遍'}
-            </span>
-          )
-        )}
-        {looping ? (
-          <button className="repeat" onClick={onUnloop}>
-            取消循环
-          </button>
-        ) : (
-          onRepeat && (
-          <button className="repeat" onClick={() => onRepeat(sectionIndex)}>
-            再绕一遍
-            </button>
-          )
-        )}
-      </div>
+      <PassHead
+        compiled={compiled}
+        shown={shown}
+        placed={live || parked}
+        live={live}
+        looping={looping}
+        onRepeat={onRepeat}
+        onUnloop={onUnloop}
+      />
       <div className="cards" style={{ '--cols': cols, '--rows': Math.ceil(bars.length / cols) } as CSSProperties}>
         {bars.map((bar, i) => {
           const current = i === card;
@@ -273,6 +285,7 @@ function LoopView({
                     <ChordName key={j} label={label} className={j === slot && labels.length > 1 ? 'now' : ''} />
                   ))}
                 </div>
+                {sung && <div className="card-lyrics">{lyricText(bar.lyrics)}</div>}
                 <div className="card-dots">
                   {Array.from({ length: bar.beats }, (_, j) => (
                     <span key={j} className={live && current && j === Math.floor(inBar) ? 'on' : ''} />
@@ -307,6 +320,157 @@ function LoopView({
     </div>
   );
 }
+
+/** Where the shown bar is in its section: bar (0-based), which pass, and whether it is the last one. */
+function passOf(section: SectionSpan, shown: SongPosition, placed: boolean, live: boolean, looping: boolean) {
+  // Bars can differ in length, so count bars rather than beats.
+  const barInSection = shown.barInSection - 1;
+  const pass = placed ? Math.floor(barInSection / section.loopBars) : 0;
+  return { barInSection, pass, lastPass: live && !looping && pass === section.times - 1 };
+}
+
+/** The section name, which pass this is, and 再绕一遍 (or 取消循环 while looping). */
+function PassHead({
+  compiled,
+  shown,
+  placed,
+  live,
+  looping,
+  onRepeat,
+  onUnloop,
+}: {
+  compiled: CompiledSong;
+  shown: SongPosition;
+  /** Playing, or stopped inside the song. */
+  placed: boolean;
+  live: boolean;
+  /** The room is looping this section, so there is no last pass. */
+  looping: boolean;
+  onRepeat: ((sectionIndex: number) => void) | null;
+  onUnloop: () => void;
+}) {
+  const section = shown.section;
+  const { pass, lastPass } = passOf(section, shown, placed, live, looping);
+  const looped = section.times > 1;
+  return (
+    <div className="loop-head">
+      <span className="section-name">{section.label}</span>
+      {looping ? (
+        <span className="pass looping">🔁 循环中{looped ? ` · 第 ${pass + 1} / ${section.times} 遍` : ''}</span>
+      ) : (
+        looped && (
+          <span className={`pass${lastPass ? ' last' : ''}`}>
+            {lastPass ? '最后一遍' : '第'} {pass + 1} / {section.times} {lastPass ? '' : '遍'}
+          </span>
+        )
+      )}
+      {looping ? (
+        <button className="repeat" onClick={onUnloop}>
+          取消循环
+        </button>
+      ) : (
+        onRepeat && (
+          <button className="repeat" onClick={() => onRepeat(compiled.sections.indexOf(section))}>
+            再绕一遍
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+/** After the reader touches or scrolls the full score, it stops following the playing bar for this long. */
+const MANUAL_SCROLL_MS = 4000;
+
+/**
+ * The whole song in playing order, every pass written out with its own lyrics, four bars to a row. It follows
+ * the playing bar, and tapping a bar jumps there. Memoized: it re-renders when the bar changes, not every frame.
+ */
+const FullScore = memo(function FullScore({
+  compiled,
+  display,
+  current,
+  target,
+  loopStart,
+  onSeekBar,
+}: {
+  compiled: CompiledSong;
+  display: DisplaySettings;
+  /** The bar being played (or the one 开始 picks up from), or -1. */
+  current: number;
+  /** Where a pending seek lands, or -1. */
+  target: number;
+  /** Start of the looped section, if any. */
+  loopStart: number | null;
+  onSeekBar: (sectionIndex: number, bar: number) => void;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const touched = useRef(-Infinity);
+  const name: ChordNamer = (slot, key) => chordLabel(slot, key, display, !!compiled.song.key);
+
+  useEffect(() => {
+    const box = scroller.current;
+    if (!box || performance.now() - touched.current < MANUAL_SCROLL_MS) return;
+    const bar = current >= 0 ? box.querySelector<HTMLElement>(`[data-bar="${current}"]`) : null;
+    // Keep the playing bar a third of the way down, so the rows after it are in view.
+    const top = bar ? bar.offsetTop - box.clientHeight / 3 : 0;
+    box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, [current]);
+
+  const touch = () => (touched.current = performance.now());
+  return (
+    <div className="full-score" ref={scroller} onPointerDown={touch} onWheel={touch} onTouchMove={touch}>
+      {compiled.sections.map((section, sectionIndex) => {
+        const looped = loopStart === section.startBeat;
+        return (
+          <section key={sectionIndex} className={`full-section${looped ? ' looped' : ''}`}>
+            <h4>
+              {looped && '🔁 '}
+              {section.label}
+              {section.times > 1 && <small> ×{section.times}</small>}
+            </h4>
+            {Array.from({ length: section.times }, (_, p) => {
+              const first = section.startBar + p * section.loopBars;
+              return (
+                <div key={p} className="full-pass">
+                  {section.times > 1 && <div className="full-pass-label">第 {p + 1} 遍</div>}
+                  <div className="full-bars">
+                    {compiled.bars.slice(first, first + section.loopBars).map((bar, i) => {
+                      const index = first + i;
+                      const state =
+                        index === current
+                          ? ' current'
+                          : index === target
+                            ? ' target'
+                            : index < current
+                              ? ' past'
+                              : '';
+                      return (
+                        <button
+                          key={index}
+                          data-bar={index}
+                          className={`full-bar${state}`}
+                          onClick={() => onSeekBar(sectionIndex, index - section.startBar)}
+                        >
+                          <span className="full-chords">
+                            {bar.chords.map((c, j) => (
+                              <ChordName key={j} label={name(c, bar.key)} />
+                            ))}
+                          </span>
+                          {display.lyrics && bar.lyrics && <span className="full-lyrics">{lyricText(bar.lyrics)}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        );
+      })}
+    </div>
+  );
+});
 
 /** Cues for this part in the bar being played, and in the next one so they can be seen coming. */
 function Cues({ compiled, barIndex, part }: { compiled: CompiledSong; barIndex: number | null; part: Part }) {
