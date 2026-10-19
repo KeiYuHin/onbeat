@@ -8,3 +8,4 @@ export * from './format';
 export * from './room';
 export * from './chord';
 export * from './lyrics';
+export * from './lyricSheet';

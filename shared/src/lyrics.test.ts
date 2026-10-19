@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lyricText, syllables } from './lyrics';
+import { lyricPieces, syllables } from './lyrics';
 
 describe('syllables', () => {
   it('gives each Chinese character a note, ignoring phrase spaces and punctuation', () => {
@@ -18,10 +18,19 @@ describe('syllables', () => {
   });
 });
 
-describe('lyricText', () => {
-  it('drops melisma marks and joins split words', () => {
-    expect(lyricText('伤_ 心__')).toBe('伤 心');
-    expect(lyricText('Some-one  like_ you')).toBe('Someone like you');
-    expect(lyricText('some-')).toBe('some');
+describe('lyricPieces', () => {
+  it('keeps one space per break and drops melisma marks', () => {
+    expect(lyricPieces('伤_  心__ ')).toEqual(['伤', ' ', '心']);
+    expect(lyricPieces('店 昨天')).toEqual(['店', ' ', '昨', '天']);
+  });
+
+  it('joins split words without a gap and keeps word breaks', () => {
+    expect(lyricPieces('Some-one like_ you').join('')).toBe('Someone like you');
+  });
+
+  it('keeps a leading space: nothing is sung on the downbeat', () => {
+    expect(lyricPieces(' 我不要')).toEqual([' ', '我', '不', '要']);
+    expect(lyricPieces(' ')).toEqual([]);
+    expect(lyricPieces('')).toEqual([]);
   });
 });
