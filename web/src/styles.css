@@ -598,94 +598,112 @@ button.link {
 .card-dots span.on {
   background: var(--accent);
 }
-.card-lyrics {
-  max-width: 100%;
-  padding: 0 6px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  text-align: center;
-  line-height: 1.25;
-  font-size: max(0.95rem, min(16cqw / var(--cols), 9cqh / var(--rows)));
-}
-.card.split .card-lyrics {
-  -webkit-line-clamp: 1;
-}
-
-/* Full score: the whole song in playing order, scrolling with the playing bar */
-.full-score {
-  position: relative;
+/* Lyric sheet: chords above the words where they change; bars with nothing sung as chord boxes */
+.sheet {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
   padding: 4px 2px 40vh;
 }
-.full-section h4 {
-  margin: 0 0 6px;
-  font-size: 1.3rem;
+.sheet-section + .sheet-section {
+  margin-top: 14px;
 }
-.full-section h4 small {
+.sheet-section h4 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.sheet-section h4 small {
   color: var(--muted);
 }
-.full-section.looped h4 {
+.sheet-section.looped h4 {
   color: #9cc8ff;
 }
-.full-pass + .full-pass {
-  margin-top: 8px;
-}
-.full-pass-label {
+.sheet-pass-label {
   color: var(--muted);
-  font-size: 0.95rem;
-  margin-bottom: 4px;
+  font-size: 0.9rem;
+  margin-top: 6px;
 }
-.full-bars {
+.sheet-lines {
+  margin: 0;
+  font-size: 1.4rem;
+  /* Room above each line for the chords */
+  line-height: 2.6;
+  color: var(--fg);
+}
+.sheet-phrase {
+  display: inline-block;
+  max-width: 100%;
+}
+.sheet-frag {
+  cursor: pointer;
+  border-radius: 6px;
+}
+.sheet-frag.past {
+  opacity: 0.5;
+}
+.sheet-frag.current {
+  background: #5a3f12;
+  box-shadow: 0 0 0 3px #5a3f12;
+}
+.sheet-frag.target {
+  outline: 2px dashed var(--accent);
+}
+.sheet-anchor {
+  position: relative;
+}
+.sheet-chord {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: -0.25em;
+  font-size: 0.75em;
+  line-height: 1;
+  font-weight: bold;
+  white-space: nowrap;
+  color: var(--accent);
+}
+.sheet-bars {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  margin: 6px 0;
 }
-.full-bar {
+.sheet-bar {
   min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   text-align: left;
+  font-weight: normal;
   background: #2c2c2c;
   border: 3px solid transparent;
   border-radius: 10px;
-  font-weight: normal;
 }
-.full-bar.past {
+.sheet-bar.past {
   opacity: 0.5;
 }
-.full-bar.current {
+.sheet-bar.current {
   border-color: var(--accent);
   background: #3a2c14;
 }
-.full-bar.target {
-  border: 3px dashed var(--accent);
+.sheet-bar.target {
+  border-style: dashed;
+  border-color: var(--accent);
 }
-.full-chords {
+.sheet-bar-chords {
   display: flex;
   flex-wrap: wrap;
   gap: 0 0.4em;
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   font-weight: bold;
-  line-height: 1.1;
+  color: var(--accent);
 }
-.full-lyrics {
-  font-size: 1.15rem;
-  line-height: 1.3;
+.sheet-bar small {
   color: var(--fg);
-  overflow-wrap: anywhere;
 }
-.chord-panel.flash .full-bar {
+.chord-panel.flash .sheet-bar {
   background: rgba(0, 0, 0, 0.25);
 }
 .preview {
@@ -731,6 +749,21 @@ button.link {
 }
 .part-label {
   color: var(--accent);
+}
+/* The lyric sheet in the part panel's place: give it the room the chord cards don't need */
+.part-panel.sheet-panel {
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 8px 12px;
+}
+.score.with-sheet {
+  grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) auto;
+}
+@media (orientation: landscape) {
+  .score.with-sheet {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
 }
 .strum {
   display: flex;
