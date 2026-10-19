@@ -2,7 +2,7 @@
 
 Band rehearsal sync: each member sees their own part on their own phone, and everyone moves through the same bar and beat on one shared clock. See `SPEC.md` for the full design.
 
-Current milestone: **M4a 白玉米谱 charts** (M1–M3.9 done). Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Chords can be written as letters or scale degrees and shown either way, with a capo; bars can change meter, songs can change key, and parts get cues. Any device can also play a click and/or a drum machine, locked to the same shared clock. Any member can jump to a section or bar, loop a section and change the tempo for the whole room.
+Current milestone: **M4b lyrics and the full score** (M1–M3.9 done, M4a built). Songs can carry lyrics, shown on the bar cards and in a full-score view of the whole song. Each device shows the song, section, bar and beat, the current section as a row of bar cards (the loop view), and its own part (strum pattern with the current eighth note highlighted, a text pattern/groove, or the drummer's step grid), plus a section timeline. Chords can be written as letters or scale degrees and shown either way, with a capo; bars can change meter, songs can change key, and parts get cues. Any device can also play a click and/or a drum machine, locked to the same shared clock. Any member can jump to a section or bar, loop a section and change the tempo for the whole room.
 
 ## Run locally (rehearsal-room laptop)
 
@@ -44,6 +44,12 @@ The metronome and drum machine follow jumps, loops and tempo changes exactly, be
 
 The middle panel shows one pass of the current section as bar cards (for example C Am F G), with the cursor going round them and **第 2 / 4 遍** at the top right. A section written as 8 bars that is really 4 bars twice is detected automatically. On the last pass the counter turns orange (**最后一遍**) and the next section is previewed underneath (下一段：副歌 · F G C Am). The last bar card also splits in two: its own chord on top, and the next section's first chord large underneath (→ 副歌 · F). When that bar is playing, the bottom half turns solid orange. A jump waiting for the barline shows its target the same way on the current card.
 
+If the song has lyrics, each card shows what is sung in that bar on this pass.
+
+### Full score
+
+Under **谱面 → 视图**, each phone can switch from 循环 to **全谱**: the whole song in playing order, every pass written out with its own lyrics, four bars to a row. The playing bar is outlined in orange and kept a third of the way down the screen; after you touch or scroll it, it stops following for 4 seconds. **Tapping a bar jumps the whole room there** (at the next barline while playing), and the target gets a dashed outline until it happens. **谱面 → 歌词** hides lyrics on this phone.
+
 **再绕一遍** adds one more pass of the current section for everyone, for when the band decides on the spot to go round again. It is refused in the section's last beat (too late to reach every phone in time). Starting again from the top plays the song as written; restarting from a later bar keeps the extra passes, so the bars stay where they were.
 
 ### Drum machine editor (whole room)
@@ -83,6 +89,15 @@ A bar that needs more than chords is an object:
 - `cues` are short notes shown on that part's screen (plain text: everyone's), from one bar ahead.
 
 A **key change** goes in `form`: `["verse", "chorus", { "section": "chorus", "key": "A" }]` plays the last chorus, and everything after it, in A.
+
+**Lyrics** go in the section, one group per pass, each a string per bar of the loop (or of `bars` as written):
+
+```json
+"verse": { "loop": [["1"], ["6m"], ["4"], ["5"]], "times": 2,
+  "lyrics": [["我最爱去的唱片店 昨天", "是她的最后一天 曾经", "…", "…"], ["第二遍…", "…", "…", "…"]] }
+```
+
+Every time the section goes round once, wherever it is in the form (再绕一遍 included), the next group is sung; when they run out, the last one repeats. Words sung before the barline (pickups) belong to the bar before, even across sections; `""` is a bar with nothing sung. Lyrics are written so a melody can be added later without touching them: each Chinese character takes one note, English words split at spaces and `-` (`some-one`), `_` holds the previous syllable over one more note, and spaces and punctuation take no note.
 
 Each phone picks how chords are shown under **谱面**: letters, scale degrees, or both, and a guitar capo (letters then show the fingering, e.g. B with capo 2 shows A shapes).
 
