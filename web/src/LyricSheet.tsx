@@ -48,6 +48,18 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
   const browseTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   // The section at the top of the view when sections appear or disappear, to keep it where it was.
   const anchor = useRef<{ section: string; top: number } | null>(null);
+  // A new section drops the one above it off the sheet, which would pull everything up at once and make the
+  // smooth scroll start from the wrong place. Before that render reaches the page (the DOM is still the old
+  // one here), note where the outgoing section sits: it stays, blurred, and goes back to the same spot.
+  const lastFocus = useRef(focus);
+  if (focus !== lastFocus.current) {
+    const el =
+      lastFocus.current !== undefined && !browsing
+        ? scroller.current?.querySelector<HTMLElement>(`[data-section="${lastFocus.current}"]`)
+        : null;
+    anchor.current = el ? { section: String(lastFocus.current), top: el.getBoundingClientRect().top } : anchor.current;
+    lastFocus.current = focus;
+  }
   const name: ChordNamer = (slot, key) => shortChord(chordLabel(slot, key, display, !!compiled.song.key));
 
   useEffect(() => {
@@ -65,7 +77,7 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
     anchor.current = null;
     const el = a && box?.querySelector<HTMLElement>(`[data-section="${a.section}"]`);
     if (box && el) box.scrollTop += el.getBoundingClientRect().top - a.top;
-  }, [browsing]);
+  }, [browsing, focus]);
 
   useEffect(() => () => clearTimeout(browseTimer.current), []);
 
