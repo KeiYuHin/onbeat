@@ -3,11 +3,12 @@
 // write R2 so they show up at once; the library repo's Action syncs R2 on every push.
 import { formatJson, parseSong, SaveConflictError, type Song, type SongLibrary } from '@onbeat/shared';
 import exampleSong from '../../songs/example-song.json';
+import jianpuSong from '../../songs/jianpu-example.json';
 
 /** The library of the public repo's own songs. It needs no key and is bundled with the Worker. */
 export const PUBLIC_LIBRARY = 'public';
 
-const PUBLIC_SONGS: Song[] = [parseSong(exampleSong)];
+const PUBLIC_SONGS: Song[] = [parseSong(exampleSong), parseSong(jianpuSong)];
 
 export type LibraryEnv = {
   /** R2 bucket; library `<name>` keeps its songs under `<name>/songs/<id>.json`. */
