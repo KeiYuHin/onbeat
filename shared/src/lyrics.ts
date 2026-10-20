@@ -1,5 +1,5 @@
 // Lyrics, one string per bar. Timing comes from the melody (M4c): each syllable takes one sounding note, so a
-// bar's lyrics never need rewriting when its melody is added. See SPEC.md, 级数谱兼容 §4 and §12.
+// bar's lyrics never need rewriting when its melody is added. See SPEC.md, 目标谱面.
 
 /** Holds the syllable before it over one more note (a melisma). */
 export const MELISMA = '_';
