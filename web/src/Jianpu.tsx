@@ -81,7 +81,11 @@ const JianpuBar = memo(function JianpuBar({ compiled, display, bar, state, note,
                 <ChordName key={k} className="jp-chord" label={shortChord(chordLabel(slot, key, display, keyed))} />
               ))}
             </div>
-            {col.note ? <NoteGlyph note={col.note} join={col.join} /> : <div className="jp-note" />}
+            {col.note ? (
+              <NoteGlyph note={col.note} join={col.join} tiedIn={i === 0 && span.tiedIn} last={i === bar.columns.length - 1} />
+            ) : (
+              <div className="jp-note" />
+            )}
             {melodic && <div className="jp-syllable">{col.syllable || ' '}</div>}
           </div>
         ))}
@@ -100,7 +104,7 @@ function PartLine({ line }: { line: JpLine }) {
       {line.label && <span className="jp-line-label">{PART_SHORT[line.part]}:</span>}
       {line.notes.map(({ note, join }, i) => (
         <div key={i} className="jp-col" style={{ flexGrow: note.beats }}>
-          <NoteGlyph note={note} join={join} />
+          <NoteGlyph note={note} join={join} last={i === line.notes.length - 1} />
         </div>
       ))}
       {line.more && <span className="jp-more">~</span>}
@@ -110,9 +114,11 @@ function PartLine({ line }: { line: JpLine }) {
 
 /**
  * A jianpu note: the number with its octave dots, underlines and dot. Underlines shared with the next note
- * run on to it; an arc reaches over to the next note (or the barline).
+ * run on to it; an arc reaches over to the next note. An arc over a barline is drawn in halves, one out of
+ * the bar's last note and one into the next bar's first (`tiedIn`), so it still reads across a line break.
  */
-function NoteGlyph({ note, join }: { note: Note; join: number }) {
+function NoteGlyph({ note, join, tiedIn = false, last }: { note: Note; join: number; tiedIn?: boolean; last: boolean }) {
+  const raised = note.octave > 0 ? ' raised' : '';
   const lines = Array.from({ length: note.underlines }, (_, k) => k + 1);
   const low = Math.max(0, -note.octave);
   return (
@@ -124,7 +130,8 @@ function NoteGlyph({ note, join }: { note: Note; join: number }) {
           ))}
         </span>
       )}
-      {note.arc && <span className={`jp-arc${note.octave > 0 ? ' raised' : ''}`} />}
+      {tiedIn && <span className={`jp-arc in${raised}`} />}
+      {note.arc && <span className={`jp-arc${last ? ' out' : ''}${raised}`} />}
       <span className="jp-digit">
         {note.accidental && <sup className="jp-acc">{note.accidental === '#' ? '♯' : '♭'}</sup>}
         {note.degree ?? '–'}

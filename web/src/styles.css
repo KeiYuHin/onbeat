@@ -733,6 +733,7 @@ button.link {
   flex-wrap: wrap;
   row-gap: 10px;
   margin: 4px 0;
+  padding-left: 2px;
 }
 /* Takes most of the spare room in the last row, so a bar left on its own isn't stretched across it */
 .jp-pass::after {
@@ -746,6 +747,9 @@ button.link {
   display: flex;
   flex-direction: column;
   padding: 0 6px 4px;
+  /* Barlines on both sides, overlapping the bar before, so a row starts with one too */
+  margin-left: -2px;
+  border-left: 2px solid #777;
   border-right: 2px solid #777;
   cursor: pointer;
 }
@@ -895,6 +899,22 @@ button.link {
 }
 .jp-arc.raised {
   top: -0.2em;
+}
+/* Over a barline: the left half out to the barline, the right half in from it (bar padding is 6px) */
+.jp-arc.out {
+  width: calc(100% - 0.5ch + 8px);
+  border-right: none;
+  border-radius: 100% 0 0 0 / 100% 0 0 0;
+}
+.jp-arc.in {
+  left: -8px;
+  width: calc(8px + 0.5ch);
+  border-left: none;
+  border-radius: 0 100% 0 0 / 0 100% 0 0;
+}
+.jp-bar.repeat-start .jp-col:first-child .jp-arc.in {
+  left: -12px;
+  width: calc(12px + 0.5ch);
 }
 .jp-syllable {
   min-height: 1.5em;
