@@ -2,6 +2,8 @@
 import { PARTS, type Part } from './protocol';
 import { everyBeats, type Barlines } from './timeline';
 import { parseChord, parseKey, type Chord, type Key } from './chord';
+import { arcsOut, melodyProblem, parseMelody, sungCount, type Note } from './jianpu';
+import { syllables } from './lyrics';
 
 export const DRUMS = ['kick', 'snare', 'hat', 'crash', 'ride', 'tom'] as const;
 export type Drum = (typeof DRUMS)[number];
@@ -57,18 +59,29 @@ export type Bar = {
   /** Only for a bar in a different meter from the song (a 2/4 bar in a 4/4 song). */
   timeSignature?: TimeSignature;
   cues?: Cue[];
+  /** Jianpu melody text (`jianpu.ts`), from the section's `melody`. */
+  melody?: string;
+  /** The melody's first note continues the last one of the bar before (an arc over the barline). */
+  tiedIn?: boolean;
+  /** Part lines like a chart's `Bs: 4. 4_ 5 -`, from the section's `lines`. */
+  lines?: PartLine[];
 };
 
+/** A part's line in one bar, in jianpu text. `more` marks the last bar written: "carry on like this" (`~`). */
+export type PartLine = { part: Part; text: string; more?: boolean };
+
 /**
- * A note on a bar, like the 起鼓 or 钢琴 on a 白玉米谱 chart, for one part or (without `part`) everyone.
- * JSON writes an everyone cue as just its text.
+ * A note on a bar, like the 起鼓 or 钢琴 on a 白玉米谱 chart, for one part or (without `part`) everyone,
+ * on every pass of the section or (with `pass`, 1-based) on just that one. JSON writes an everyone cue as
+ * just its text.
  */
-export type Cue = { part?: Part; text: string };
+export type Cue = { part?: Part; text: string; pass?: number };
 
 /**
  * Parsed sections always list their bars unrolled; `{ loop, times }` in the JSON is expanded by parseSong.
  * `lyrics` has one group per pass, each a string per bar of the loop (or of `bars` as written): every time the
  * section is played round once, wherever it is in the form, the next group is sung, and the last one repeats.
+ * The JSON's `melody` and `lines` are per bar of the loop too; parseSong moves them onto the bars.
  */
 export type Section = { label?: string; bars: Bar[]; lyrics?: string[][] };
 
@@ -137,6 +150,51 @@ export function parseSong(data: unknown): Song {
     if (!Array.isArray(written) || written.length === 0) fail(`section "${id}" has no bars`);
     if (looped && !(Number.isInteger(sec.times) && sec.times >= 1)) fail(`section "${id}" loop needs "times" (1 or more)`);
     const parsed = written.map((bar: unknown, i: number) => parseBar(bar, (msg) => fail(`section "${id}" bar ${i + 1} ${msg}`)));
+    const ofLoop = looped ? ' of the loop' : '';
+    /** Parses a bar's jianpu text and checks it fills the bar. */
+    const notesOf = (bar: Bar, text: string, where: string): Note[] => {
+      const q = quartersPerBeat(bar.timeSignature ?? ts);
+      let notes: Note[] = [];
+      try {
+        notes = parseMelody(text, q);
+      } catch (e) {
+        fail(`${where}: ${(e as Error).message}`);
+      }
+      const problem = melodyProblem(notes, meter(bar.timeSignature ?? ts).beats, q);
+      if (problem) fail(`${where} ${problem}`);
+      return notes;
+    };
+    const melody = sec.melody;
+    const melodies: (Note[] | null)[] = [];
+    if (melody !== undefined) {
+      if (!Array.isArray(melody) || melody.length !== written.length || !melody.every((m) => typeof m === 'string'))
+        fail(`section "${id}" melody needs ${written.length} strings, one per bar${ofLoop}`);
+      parsed.forEach((bar: Bar, i: number) => {
+        const text = melody[i].trim();
+        const notes = text ? notesOf(bar, text, `section "${id}" melody bar ${i + 1}`) : null;
+        melodies.push(notes);
+        if (!notes) return;
+        bar.melody = text;
+        // Only within the section as written: an arc out of its last bar is drawn but carries nothing over.
+        if (melodies[i - 1] && arcsOut(melodies[i - 1]!)) bar.tiedIn = true;
+      });
+    }
+    if (sec.lines !== undefined) {
+      if (typeof sec.lines !== 'object' || sec.lines === null || Array.isArray(sec.lines))
+        fail(`section "${id}" lines must be like { "bass": ["4. 4_ 5 -"] }`);
+      for (const [part, line] of Object.entries<unknown>(sec.lines)) {
+        if (!PARTS.includes(part as Part)) fail(`section "${id}" lines for unknown part "${part}"`);
+        const ok = Array.isArray(line) && line.length > 0 && line.length <= written.length && line.every((l) => typeof l === 'string');
+        if (!ok) fail(`section "${id}" lines.${part} needs 1 to ${written.length} strings, one per bar${ofLoop}`);
+        (line as string[]).forEach((l, i, all) => {
+          const text = l.trim();
+          if (!text) return;
+          notesOf(parsed[i], text, `section "${id}" lines.${part} bar ${i + 1}`);
+          const more = i === all.length - 1 && all.length < written.length;
+          (parsed[i].lines ??= []).push({ part: part as Part, text, ...(more && { more }) });
+        });
+      }
+    }
     const bars: Bar[] = looped ? Array.from({ length: sec.times }, () => parsed).flat() : parsed;
     const lyrics = sec.lyrics;
     if (lyrics !== undefined) {
@@ -144,7 +202,18 @@ export function parseSong(data: unknown): Song {
       if (!ok) fail(`section "${id}" lyrics must be a list of passes, each a list of one string per bar`);
       lyrics.forEach((group: unknown[], p: number) => {
         if (group.length !== written.length || !group.every((l) => typeof l === 'string'))
-          fail(`section "${id}" lyrics pass ${p + 1} needs ${written.length} strings, one per bar${looped ? ' of the loop' : ''}`);
+          fail(`section "${id}" lyrics pass ${p + 1} needs ${written.length} strings, one per bar${ofLoop}`);
+        group.forEach((text, i) => {
+          const notes = melodies[i];
+          if (!notes || !(text as string).trim()) return;
+          const words = syllables(text as string).length;
+          const sung = sungCount(notes, !!parsed[i].tiedIn);
+          if (words !== sung)
+            fail(
+              `section "${id}" lyrics pass ${p + 1} bar ${i + 1} has ${words} syllables for ${sung} sung notes ` +
+                '(write _ for a syllable held over one more note, ~ for an arc)',
+            );
+        });
       });
     }
     sections[id] = {
@@ -192,10 +261,16 @@ export function parseSong(data: unknown): Song {
   return { ...structuredClone(s), sections, form } as Song;
 }
 
-const isTimeSignature = (ts: unknown): ts is TimeSignature =>
+/** Quarter notes per beat, the unit jianpu durations are written in: 1 in 4/4, 1.5 in 12/8, 0.5 in 3/8. */
+const quartersPerBeat = ([n, d]: TimeSignature) => (n * 4) / d / meter([n, d]).beats;
+
+const isTimeSignature =(ts: unknown): ts is TimeSignature =>
   Array.isArray(ts) && ts.length === 2 && Number.isInteger(ts[0]) && ts[0] > 0 && [2, 4, 8].includes(ts[1]);
 
-/** `["C", "G/B"]`, or `{ "chords": [...], "timeSignature": [2, 4], "cues": ["rit.", { "part": "drums", "text": "起鼓" }] }`. */
+/**
+ * `["C", "G/B"]`, or `{ "chords": [...], "timeSignature": [2, 4], "cues": ["rit.", { "part": "drums", "text": "起鼓" }] }`.
+ * A cue `{ "text", "pass": 2 }` shows on the section's 2nd pass only.
+ */
 function parseBar(bar: any, fail: (msg: string) => never): Bar {
   const written = Array.isArray(bar) ? { chords: bar } : bar;
   if (typeof written !== 'object' || written === null) fail('must be an array of chord names or an object');
@@ -209,7 +284,8 @@ function parseBar(bar: any, fail: (msg: string) => never): Bar {
     const c = typeof cue === 'string' ? { text: cue } : cue;
     if (typeof c?.text !== 'string' || !c.text) fail('cues must be text or { "part", "text" }');
     if (c.part !== undefined && !PARTS.includes(c.part)) fail(`cue for unknown part "${c.part}"`);
-    return { ...(c.part && { part: c.part }), text: c.text };
+    if (c.pass !== undefined && !(Number.isInteger(c.pass) && c.pass >= 1)) fail("a cue's pass must be 1 or more");
+    return { ...(c.part && { part: c.part }), text: c.text, ...(c.pass && { pass: c.pass }) };
   });
   return { chords, ...(timeSignature && { timeSignature }), ...(parsedCues.length && { cues: parsedCues }) };
 }
@@ -295,9 +371,15 @@ export type BarSpan = {
   meter: Meter;
   /** The key in effect, after any key change; C when the song has none. */
   key: Key;
+  /** This pass's cues: those without a `pass`, and those for this one. */
   cues: Cue[];
   /** What is sung in this bar on this pass; empty when nothing is. */
   lyrics: string;
+  /** Null when the bar has no melody written. */
+  melody: Note[] | null;
+  /** The melody's first note is the last one of the bar before, carried over the barline by an arc. */
+  tiedIn: boolean;
+  lines: { part: Part; notes: Note[]; more: boolean }[];
 };
 
 const C_MAJOR = parseKey('C')!;
@@ -372,8 +454,22 @@ export function compileSong(song: Song, extraPasses: ExtraPasses = {}): Compiled
         const pass = (sung.get(id) ?? 0) + Math.floor(i / group);
         words = lyrics[Math.min(pass, lyrics.length - 1)][i % group];
       }
-      const cues = bar.cues ?? [];
-      bars.push({ chords, sectionIndex, startBeat: beat, beats: m.beats, meter: m, key, cues, lyrics: words });
+      const pass = Math.floor(i / loopBars) + 1;
+      const cues = (bar.cues ?? []).filter((c) => !c.pass || c.pass === pass);
+      const q = quartersPerBeat(bar.timeSignature ?? song.timeSignature);
+      bars.push({
+        chords,
+        sectionIndex,
+        startBeat: beat,
+        beats: m.beats,
+        meter: m,
+        key,
+        cues,
+        lyrics: words,
+        melody: bar.melody ? parseMelody(bar.melody, q) : null,
+        tiedIn: !!bar.tiedIn,
+        lines: (bar.lines ?? []).map((l) => ({ part: l.part, notes: parseMelody(l.text, q), more: !!l.more })),
+      });
       beat += m.beats;
     }
     if (lyrics) sung.set(id, (sung.get(id) ?? 0) + Math.ceil((loopBars * times) / lyrics[0].length));
