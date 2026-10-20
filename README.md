@@ -46,6 +46,8 @@ The middle panel shows one pass of the current section as bar cards (for example
 
 If the song has lyrics, the part panel (right in landscape, below in portrait) becomes a **lyric sheet**: chords above the words where they change, the way a ChordPro chart looks, with the playing bar's words highlighted and the sheet scrolling along. Like lyrics in a music player, the section being played and the next one are sharp, the one before and the one after next are blurred, and the rest are hidden. While you scroll it by hand, every section shows, sharp; 4 seconds after you let go it goes back to following the band. Section names are small and grey, and the sheet spells maj7 as M7 (CM7) to save room. Your part's cues stay on top of it. Turn lyrics off under **谱面 → 歌词** to get the part panel back (strum pattern, drum grid, notes).
 
+If the song has a **melody**, the sheet is a jianpu chart instead, like a 白玉米谱 page: chord boxes over the note they start on, the numbers with octave dots, underlines joined within each beat, ties and slurs, a syllable under each sung note, cues above the bar and part lines like `Bs:` below. The playing note turns orange. A phone held upright fits up to two bars a row; a wider sheet up to four.
+
 ### Full score
 
 Under **谱面 → 视图**, each phone can switch from 循环 to **全谱**: the whole song in playing order as one lyric sheet, every pass on its own line with its own lyrics, and instrumental bars as rows of chord boxes. The playing bar is highlighted and kept a third of the way down the screen; after you touch or scroll it, it stops following for 4 seconds. **Tapping a bar jumps the whole room there** (at the next barline while playing), and the target gets a dashed outline until it happens. **谱面 → 歌词** hides lyrics on this phone.
@@ -86,7 +88,7 @@ A bar that needs more than chords is an object:
 ```
 
 - `timeSignature` changes the meter for that bar only. The song's own `timeSignature` can be compound: `[12, 8]` counts four dotted-quarter beats a bar, `bpm` is per dotted quarter, and drum patterns have one step per eighth note (12 steps).
-- `cues` are short notes shown on that part's screen (plain text: everyone's), from one bar ahead.
+- `cues` are short notes shown on that part's screen (plain text: everyone's), from one bar ahead. Add `"pass": 2` to show one only on the section's second pass (`{ "text": "只有钢琴 + 贝斯", "pass": 2 }`).
 
 A **key change** goes in `form`: `["verse", "chorus", { "section": "chorus", "key": "A" }]` plays the last chorus, and everything after it, in A.
 
@@ -98,6 +100,17 @@ A **key change** goes in `form`: `["verse", "chorus", { "section": "chorus", "ke
 ```
 
 Every time the section goes round once, wherever it is in the form (再绕一遍 included), the next group is sung; when they run out, the last one repeats. Words sung before the barline (pickups) belong to the bar before, even across sections; `""` is a bar with nothing sung, and a string starting with a space (`" 我不要"`) is a bar whose words start after the downbeat, so its chord isn't put over the first word. On the sheet, a pickup that leads into the next pass (or out of a bar with nothing on the downbeat) moves to the start of the next line. Lyrics are written so a melody can be added later without touching them: each Chinese character takes one note, English words split at spaces and `-` (`some-one`), `_` holds the previous syllable over one more note, and spaces and punctuation take no note.
+
+**Melody** turns the sheet into a jianpu chart, like a 白玉米谱 page (`songs/jianpu-example.json`). It goes in the section as one string per bar of the loop (`""` for a bar without one), and part lines like the chart's `Bs:` go in `lines`, which may stop early (the chart then shows `~`, "carry on like this"):
+
+```json
+"verse": { "loop": [["4", "-", "5", "-"], ["1"]], "times": 2,
+  "melody": ["6_ 6= 1'= 1'_ 6_ 5 3_ 2_", "1 2_ 3=~ 3= 3 -"],
+  "lyrics": [["晚风吹过了旧街口", "灯火亮了"]],
+  "lines": { "bass": ["4. 4_ 5 -"] } }
+```
+
+Notes are separated by spaces: `1`–`7` (`0` a rest), `#`/`b` before it, `'` or `,` after it for each octave up or down, then `_` for an eighth or `=` (or `__`) for a sixteenth, then `.` for a dot, then `~` for an arc to the next note (a tie or a slur; across the barline from a bar's last note). `-` on its own holds the note before for another quarter. Each bar must add up to its meter (in quarter notes: 4 in 4/4, 6 in 12/8). Every pitch that no arc leads into takes one syllable of that bar's lyrics, so the counts must match: write `_` in the lyrics for a syllable held over a note without an arc. An arc over a barline carries only within the section as written.
 
 Each phone picks how chords are shown under **谱面**: letters, scale degrees, or both, and a guitar capo (letters then show the fingering, e.g. B with capo 2 shows A shapes).
 
@@ -134,7 +147,7 @@ To try a private library locally:
 2. Upload the library checkout to the local R2 bucket (from `worker/`): `node scripts/sync-library.mjs ../../onbeat-library band`
 3. `npm run worker`, then open `http://<laptop-ip>:8788/#k=<the key>` once on each phone. The key is remembered; the lobby says when a private library is connected. Rooms created after that use the private library, and tapping the room code shows a QR code and link (with the key) for bandmates.
 
-Without a key you only get the public example song.
+Without a key you only get the public example songs.
 
 ## Deploy to Cloudflare
 
