@@ -100,6 +100,11 @@ describe('melody in parseSong', () => {
     expect(s.sections.a.bars[1]).toMatchObject({ melody: '4 5 6 7', tiedIn: true });
   });
 
+  it('does not fold bars with the same chords but a different melody into a loop', () => {
+    const c = compileSong(parseSong({ ...base, sections: { a: { bars: [['C'], ['C']], melody: ['1 2 3 4', '5 6 7 1'] } } }));
+    expect(c.sections[0]).toMatchObject({ loopBars: 2, times: 1 });
+  });
+
   it('measures 12/8 in dotted quarters', () => {
     expect(() => parseSong({ ...withA({ melody: ['1. 2. 3. 4.', '5. 0. 0. 0.'] }), timeSignature: [12, 8] })).not.toThrow();
   });

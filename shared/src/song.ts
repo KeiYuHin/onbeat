@@ -328,12 +328,17 @@ export function applyDrumEdits(song: Song, edits: DrumEdits | null | undefined):
   };
 }
 
-/** Smallest number of bars that repeats to fill the section (8 bars of C Am F G C Am F G → 4). */
+/**
+ * Smallest number of bars that repeats to fill the section (8 bars of C Am F G C Am F G → 4). Bars with the
+ * same chords but a different melody or part line are different music.
+ */
 export function repeatPeriod(bars: Bar[]): number {
   const same = (a: Bar, b: Bar) =>
     a.chords.length === b.chords.length &&
     a.chords.every((c, i) => c === b.chords[i]) &&
-    String(a.timeSignature) === String(b.timeSignature);
+    String(a.timeSignature) === String(b.timeSignature) &&
+    a.melody === b.melody &&
+    JSON.stringify(a.lines) === JSON.stringify(b.lines);
   for (let p = 1; p < bars.length; p++) {
     if (bars.length % p === 0 && bars.every((bar, i) => same(bar, bars[i % p]))) return p;
   }
