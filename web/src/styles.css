@@ -599,12 +599,18 @@ button.link {
   background: var(--accent);
 }
 /* Lyric sheet: chords above the words where they change; bars with nothing sung as chord boxes */
-.sheet {
+.lyric-sheet {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 2px 40vh;
+  padding: 4px 2px 0;
+}
+/* Room to scroll the last bars up to the reading line. Not padding: that would stop the sheet shrinking to its panel. */
+.lyric-sheet::after {
+  content: '';
+  display: block;
+  height: 40vh;
 }
 .sheet-section + .sheet-section {
   margin-top: 14px;
@@ -713,6 +719,208 @@ button.link {
 }
 .chord-panel.flash .sheet-bar {
   background: rgba(0, 0, 0, 0.25);
+}
+/*
+ * Jianpu chart (songs with a melody): bars wrap into rows, about two to a row on a phone held upright and
+ * four on a wider sheet. Inside a bar every note gets room for what it carries (chord box, number,
+ * syllable), and the rest of the width goes out by duration.
+ */
+.lyric-sheet {
+  container-type: inline-size;
+}
+.jp-pass {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 10px;
+  margin: 4px 0;
+}
+/* Takes most of the spare room in the last row, so a bar left on its own isn't stretched across it */
+.jp-pass::after {
+  content: '';
+  flex: 8 1 0;
+}
+.jp-bar {
+  flex-basis: auto;
+  flex-shrink: 1;
+  min-width: calc(50% - 1px);
+  display: flex;
+  flex-direction: column;
+  padding: 0 6px 4px;
+  border-right: 2px solid #777;
+  cursor: pointer;
+}
+@container (min-width: 560px) {
+  .jp-bar {
+    min-width: calc(25% - 1px);
+  }
+}
+.jp-bar.past {
+  opacity: 0.5;
+}
+.jp-bar.current {
+  background: #3a2c14;
+  border-radius: 6px;
+}
+.jp-bar.target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+/* Repeat signs around each pass of a section played more than once: thick line then thin, like ‖: and :‖ */
+.jp-bar.repeat-start {
+  border-left: 4px solid var(--fg);
+  box-shadow: inset 3px 0 0 var(--bg), inset 5px 0 0 var(--fg);
+  padding-left: 10px;
+}
+.jp-bar.repeat-end {
+  border-right: 4px solid var(--fg);
+  box-shadow: inset -3px 0 0 var(--bg), inset -5px 0 0 var(--fg);
+  padding-right: 10px;
+}
+.jp-bar.repeat-start.repeat-end {
+  box-shadow: inset 3px 0 0 var(--bg), inset 5px 0 0 var(--fg), inset -3px 0 0 var(--bg), inset -5px 0 0 var(--fg);
+}
+.jp-cues {
+  min-height: 1.5em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.jp-cue {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #4a4214;
+  color: #ffe98a;
+}
+.jp-row,
+.jp-line {
+  display: flex;
+  align-items: flex-start;
+}
+.jp-col {
+  flex-shrink: 0;
+  flex-basis: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.jp-chords {
+  display: flex;
+  gap: 2px;
+  min-height: 1.7rem;
+  align-items: flex-end;
+  padding-right: 4px;
+}
+.jp-chord {
+  padding: 0 0.25em;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  font-size: 1rem;
+  line-height: 1.3;
+  font-weight: bold;
+  white-space: nowrap;
+  color: var(--accent);
+}
+/* The number at the top left of its column, so underlines can run on to the next number */
+.jp-note {
+  position: relative;
+  width: 100%;
+  height: 2.2em;
+  padding-top: 0.5em;
+  font-size: 1.5rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.jp-digit {
+  position: relative;
+  display: inline-block;
+  padding-right: 0.3em;
+  font-weight: bold;
+  white-space: nowrap;
+}
+.jp-col.now .jp-digit {
+  color: var(--accent);
+}
+.jp-acc {
+  position: absolute;
+  right: 100%;
+  top: -0.2em;
+  font-size: 0.6em;
+}
+.jp-dot {
+  margin-left: 0.05em;
+}
+.jp-underline {
+  position: absolute;
+  left: 0;
+  width: 1ch;
+  height: 2px;
+  background: currentColor;
+}
+.jp-underline.joined {
+  width: 100%;
+}
+.jp-dots {
+  position: absolute;
+  left: 0;
+  width: 1ch;
+  display: flex;
+  align-items: center;
+  gap: 0.06em;
+}
+.jp-dots.high {
+  bottom: 1.72em;
+  flex-direction: column-reverse;
+}
+.jp-dots.low {
+  flex-direction: column;
+}
+.jp-dots i {
+  width: 0.17em;
+  height: 0.17em;
+  border-radius: 50%;
+  background: currentColor;
+}
+/* Tie or slur: from this number to the next one (or out over the barline) */
+.jp-arc {
+  position: absolute;
+  left: 0.5ch;
+  width: 100%;
+  top: 0.1em;
+  height: 0.4em;
+  border: 2px solid currentColor;
+  border-bottom: none;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+}
+.jp-arc.raised {
+  top: -0.2em;
+}
+.jp-syllable {
+  min-height: 1.5em;
+  padding-right: 0.15em;
+  font-size: 1.3rem;
+  white-space: nowrap;
+}
+.jp-words {
+  font-size: 1.3rem;
+}
+.jp-line {
+  margin-top: 2px;
+  color: #9fe0a8;
+}
+.jp-line .jp-note {
+  font-size: 1.15rem;
+}
+.jp-line-label {
+  margin-right: 0.4em;
+  padding-top: 0.5em;
+  font-size: 1.2rem;
+  font-style: italic;
+}
+.jp-more {
+  padding: 0.3em 0.4em 0;
+  font-size: 1.5rem;
 }
 .preview {
   flex: none;

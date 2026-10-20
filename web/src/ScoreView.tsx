@@ -7,6 +7,8 @@ import {
   pendingJump,
   cuesFor,
   DRUMS,
+  hasMelody,
+  noteAt,
   partDetail,
   slotAt,
   songPosition,
@@ -106,7 +108,9 @@ export function ScoreView(props: Props) {
   const current = live || parked ? shown!.barIndex : -1;
   const seekTarget = target && pending!.beat! > 0 ? target.barIndex : -1;
   // The lyric sheet takes the part panel's place: chords and words are what a phone has room for.
-  const sideSheet = display.lyrics && display.layout === 'loop' && compiled.bars.some((b) => b.lyrics);
+  const sideSheet = display.lyrics && display.layout === 'loop' && (hasMelody(compiled) || compiled.bars.some((b) => b.lyrics));
+  // The jianpu chart follows the note being played.
+  const note = live && bar?.melody ? noteAt(bar.melody, beat - bar.startBeat) : -1;
 
   return (
     <div className={`score${sideSheet ? ' with-sheet' : ''}`}>
@@ -139,6 +143,7 @@ export function ScoreView(props: Props) {
               compiled={compiled}
               display={display}
               current={current}
+              note={note}
               target={seekTarget}
               loopStart={loop?.startBeat ?? null}
               onSeekBar={onSeekBar}
@@ -169,6 +174,7 @@ export function ScoreView(props: Props) {
             compiled={compiled}
             display={display}
             current={current}
+            note={note}
             target={seekTarget}
             loopStart={loop?.startBeat ?? null}
             focus={shown ? sections.indexOf(shown.section) : undefined}

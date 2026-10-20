@@ -1,7 +1,8 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { lyricSheet, type CompiledSong } from '@onbeat/shared';
+import { hasMelody, jianpuSheet, lyricSheet, type CompiledSong, type JpBar, type SheetBlock } from '@onbeat/shared';
 import { ChordName, type ChordNamer } from './ChordName';
 import { chordLabel, shortChord, type DisplaySettings } from './display';
+import { JianpuPass } from './Jianpu';
 
 /**
  * How a section shows relative to the one being played: it and the next are sharp, the one before and the
@@ -20,6 +21,8 @@ type Props = {
   display: DisplaySettings;
   /** The bar being played (or the one 开始 picks up from), or -1. */
   current: number;
+  /** The note being played in that bar, or -1: a song with a melody shows as a jianpu chart that follows it. */
+  note: number;
   /** Where a pending seek lands, or -1. */
   target: number;
   /** Start of the looped section, if any. */
@@ -35,12 +38,16 @@ type Props = {
 };
 
 /**
- * The whole song as a lyric sheet in playing order: chords above the words where they change, bars with
- * nothing sung as chord boxes. It follows the playing bar, and tapping a bar jumps the room there. Memoized:
- * it re-renders when the bar changes, not every frame.
+ * The whole song in playing order: as a jianpu chart when it has a melody, else as a lyric sheet (chords
+ * above the words where they change, bars with nothing sung as chord boxes). It follows the playing bar, and
+ * tapping a bar jumps the room there. Memoized: it re-renders when the bar or note changes, not every frame.
  */
-export const LyricSheet = memo(function LyricSheet({ compiled, display, current, target, loopStart, focus, onSeekBar }: Props) {
-  const sheet = useMemo(() => lyricSheet(compiled, display.lyrics), [compiled, display.lyrics]);
+export const LyricSheet = memo(function LyricSheet({ compiled, display, current, note, target, loopStart, focus, onSeekBar }: Props) {
+  const jianpu = useMemo(() => hasMelody(compiled), [compiled]);
+  const sheet = useMemo(
+    () => (jianpu ? jianpuSheet(compiled, display.lyrics) : lyricSheet(compiled, display.lyrics)),
+    [compiled, jianpu, display.lyrics],
+  );
   const scroller = useRef<HTMLDivElement>(null);
   const touched = useRef(-Infinity);
   // Scrolling by hand shows every section, sharp, until the reader has left the sheet alone for a while.
@@ -111,7 +118,7 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
   };
 
   return (
-    <div className="sheet" ref={scroller} onPointerDown={touch} onWheel={browse} onTouchMove={browse}>
+    <div className="lyric-sheet" ref={scroller} onPointerDown={touch} onWheel={browse} onTouchMove={browse}>
       {sheet.map(({ sectionIndex, passes }) => {
         const shown = focus === undefined || browsing ? 'sharp' : focusClass(sectionIndex, focus);
         if (!shown) return null;
@@ -128,49 +135,61 @@ export const LyricSheet = memo(function LyricSheet({ compiled, display, current,
               {section.label}
               {section.times > 1 && <small> ×{section.times}</small>}
             </h4>
-            {passes.map((blocks, p) => (
+            {passes.map((pass, p) => (
               <div key={p} className="sheet-pass">
-                {blocks.map((block, k) =>
-                  block.kind === 'bars' ? (
-                    <div key={k} className="sheet-bars">
-                      {block.bars.map(({ bar, text }) => (
-                        <button key={bar} data-bar={bar} className={`sheet-bar${state(bar)}`} onClick={() => seek(bar)}>
-                          <span className="sheet-bar-chords">
-                            {compiled.bars[bar].chords.map((c, j) => (
-                              <ChordName key={j} label={name(c, compiled.bars[bar].key)} />
-                            ))}
-                          </span>
-                          {text && <small>{text}</small>}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p key={k} className="sheet-lines">
-                      {block.phrases.map((phrase, j) => (
-                        <Fragment key={j}>
-                          {j > 0 && ' '}
-                          <span className="sheet-phrase">
-                            {phrase.map((frag, f) => (
-                              <span key={f} data-bar={frag.bar} className={`sheet-frag${state(frag.bar)}`} onClick={() => seek(frag.bar)}>
-                                {frag.pieces.map((piece, i) =>
-                                  piece.chord ? (
-                                    <span key={i} className="sheet-anchor">
-                                      <span className="sheet-chord">
-                                        <ChordName label={name(piece.chord.slot, piece.chord.key)} />
+                {jianpu ? (
+                  <JianpuPass
+                    compiled={compiled}
+                    display={display}
+                    bars={pass as JpBar[]}
+                    state={state}
+                    current={current}
+                    note={note}
+                    onSeekBar={onSeekBar}
+                  />
+                ) : (
+                  (pass as SheetBlock[]).map((block, k) =>
+                    block.kind === 'bars' ? (
+                      <div key={k} className="sheet-bars">
+                        {block.bars.map(({ bar, text }) => (
+                          <button key={bar} data-bar={bar} className={`sheet-bar${state(bar)}`} onClick={() => seek(bar)}>
+                            <span className="sheet-bar-chords">
+                              {compiled.bars[bar].chords.map((c, j) => (
+                                <ChordName key={j} label={name(c, compiled.bars[bar].key)} />
+                              ))}
+                            </span>
+                            {text && <small>{text}</small>}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p key={k} className="sheet-lines">
+                        {block.phrases.map((phrase, j) => (
+                          <Fragment key={j}>
+                            {j > 0 && ' '}
+                            <span className="sheet-phrase">
+                              {phrase.map((frag, f) => (
+                                <span key={f} data-bar={frag.bar} className={`sheet-frag${state(frag.bar)}`} onClick={() => seek(frag.bar)}>
+                                  {frag.pieces.map((piece, i) =>
+                                    piece.chord ? (
+                                      <span key={i} className="sheet-anchor">
+                                        <span className="sheet-chord">
+                                          <ChordName label={name(piece.chord.slot, piece.chord.key)} />
+                                        </span>
+                                        {piece.text}
                                       </span>
-                                      {piece.text}
-                                    </span>
-                                  ) : (
-                                    piece.text
-                                  ),
-                                )}
-                              </span>
-                            ))}
-                          </span>
-                        </Fragment>
-                      ))}
-                    </p>
-                  ),
+                                    ) : (
+                                      piece.text
+                                    ),
+                                  )}
+                                </span>
+                              ))}
+                            </span>
+                          </Fragment>
+                        ))}
+                      </p>
+                    ),
+                  )
                 )}
               </div>
             ))}
